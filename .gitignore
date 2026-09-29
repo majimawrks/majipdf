@@ -1,0 +1,8 @@
+# Local-only folders (handoffs, samples, refs, scratch)
+_*/
+
+# App
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/

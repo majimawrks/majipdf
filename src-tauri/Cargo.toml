@@ -1,0 +1,31 @@
+[package]
+name = "majipdf"
+version = "0.0.0"
+description = "Portable, offline PDF toolkit"
+edition = "2021"
+
+[lib]
+name = "majipdf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pdfium-render = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+rust_xlsxwriter = "0.99.1"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.5"
+
+[dev-dependencies]
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[profile.dev.package."*"]
+opt-level = 2

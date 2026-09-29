@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>majipdf</title>
+    <script>
+      // Applied before first paint (synchronous, blocking) to avoid a flash of the wrong theme.
+      (function () {
+        try {
+          var raw = localStorage.getItem("majipdf.settings");
+          var settings = raw ? JSON.parse(raw) : {};
+          document.documentElement.setAttribute("data-theme", settings.theme || "auto");
+          if (settings.lang) document.documentElement.setAttribute("lang", settings.lang);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "auto");
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
