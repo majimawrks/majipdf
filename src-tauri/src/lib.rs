@@ -6,6 +6,7 @@ mod job;
 mod merge;
 mod organize;
 mod pdf;
+mod runtime;
 mod split;
 mod excel;
 mod word;
@@ -87,6 +88,7 @@ fn office_status() -> OfficeStatus {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    runtime::harden();
     // Off the startup path: a big leftover (e.g. a 50 MB scan's temp) shouldn't delay the window.
     std::thread::spawn(compress::sweep_temp);
     tauri::Builder::default()
@@ -95,6 +97,8 @@ pub fn run() {
             // The window starts hidden and the frontend shows it after its first paint (main.ts).
             // Fallback so a broken/slow page can never leave the app invisible.
             use tauri::Manager;
+            runtime::init(&app.package_info().version.to_string());
+            runtime::warm();
             if let Some(w) = app.get_webview_window("main") {
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(3));

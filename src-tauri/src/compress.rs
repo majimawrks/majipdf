@@ -129,8 +129,11 @@ pub(crate) fn gs_args(preset: &str, dpi: u32, gray: bool, pw: Option<&str>, inpu
 
 /// Runs gs to completion; calls `on_page(n)` for each "Page N" line.
 pub(crate) fn run_gs(args: &[String], mut on_page: impl FnMut(u32)) -> Result<(), GsErr> {
-    let exe = pdf::bundled("gs/bin/gswin64c.exe", "gs/bin/gswin64c.exe");
+    let exe = crate::runtime::path("gswin64c.exe").map_err(GsErr::Failed)?;
     let mut cmd = Command::new(&exe);
+    if let Some(dir) = exe.parent() {
+        cmd.current_dir(dir); // gsdll64.dll resolves from the exe folder
+    }
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW

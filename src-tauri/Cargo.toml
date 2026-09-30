@@ -10,6 +10,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -20,12 +22,11 @@ pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rust_xlsxwriter = "0.99.1"
 base64 = "0.22"
+sha2 = "0.10"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.5"
-
-[dev-dependencies]
-zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [profile.dev.package."*"]
 opt-level = 2

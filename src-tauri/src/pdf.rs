@@ -1,4 +1,4 @@
-//! Bundled-binary lookup + pdfium inspection (pages / encrypted / signed / damaged).
+//! pdfium inspection (pages / encrypted / signed / damaged).
 use pdfium_render::prelude::*;
 use serde::Serialize;
 use std::fs::File;
@@ -6,26 +6,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-/// exe-adjacent path first (packaged build), then the repo's `_tools` (debug builds).
-pub fn bundled(rel_exe: &str, rel_tools: &str) -> PathBuf {
-    if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(rel_exe))) {
-        if p.exists() {
-            return p;
-        }
-    }
-    #[cfg(debug_assertions)]
-    return Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(rel_tools);
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = rel_tools;
-        PathBuf::from(rel_exe) // not found next to the exe: fail to load rather than search the build tree
-    }
-}
-
 pub(crate) fn pdfium() -> Result<MutexGuard<'static, Pdfium>, String> {
     static P: OnceLock<Result<Mutex<Pdfium>, String>> = OnceLock::new();
     let r = P.get_or_init(|| {
-        let dll = bundled("pdfium.dll", "pdfium/bin/pdfium.dll");
+        let dll = crate::runtime::path("pdfium.dll")?;
         Pdfium::bind_to_library(&dll)
             .map(|b| Mutex::new(Pdfium::new(b)))
             .map_err(|e| format!("cannot load {}: {e}", dll.display()))
