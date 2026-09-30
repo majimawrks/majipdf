@@ -197,6 +197,7 @@ export function saveSettings() {
 export const app = $state({
   route: "home" as "home" | ToolId,
   settingsOpen: false,
+  aboutOpen: false,
   dragging: false,
   home: {
     droppedFile: null as FileInfo | null,

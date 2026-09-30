@@ -274,5 +274,9 @@
   "cancelling": "Cancelling…",
   "busy": "Another task is still finishing. Try again in a moment.",
   "nameReserved": "That name is reserved by Windows. Try another.",
-  "nameLong": "That name is too long. Use 150 characters or fewer."
+  "nameLong": "That name is too long. Use 150 characters or fewer.",
+  "about": "About majipdf",
+  "aboutVersion": "Version {v}",
+  "aboutBuiltBy": "Built by Majima",
+  "aboutAi": "with AI assistance"
 }

@@ -274,5 +274,9 @@
   "cancelling": "Membatalkan…",
   "busy": "Tugas lain masih diselesaikan. Coba lagi sebentar lagi.",
   "nameReserved": "Nama itu dipakai oleh Windows. Coba nama lain.",
-  "nameLong": "Nama terlalu panjang. Gunakan maksimal 150 karakter."
+  "nameLong": "Nama terlalu panjang. Gunakan maksimal 150 karakter.",
+  "about": "Tentang majipdf",
+  "aboutVersion": "Versi {v}",
+  "aboutBuiltBy": "Dibuat oleh Majima",
+  "aboutAi": "dengan bantuan AI"
 }

@@ -74,6 +74,16 @@
   </div>
 
   <button
+    onclick={() => ((app.settingsOpen = false), (app.aboutOpen = true))}
+    aria-label={t("about")}
+    title={t("about")}
+    style="width:38px;height:38px;border-radius:10px;border:0;background:none;color:var(--text2);cursor:pointer;display:grid;place-items:center;flex-shrink:0"
+    class="hover-surface2"
+  >
+    <i class="ph ph-info" style="font-size:21px"></i>
+  </button>
+
+  <button
     data-settings-toggle
     onclick={() => (app.settingsOpen = !app.settingsOpen)}
     aria-label={t("settings")}

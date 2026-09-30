@@ -7,6 +7,7 @@
   import Header from "./lib/components/Header.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
   import SettingsPopover from "./lib/components/SettingsPopover.svelte";
+  import AboutDialog from "./lib/components/AboutDialog.svelte";
   import Home from "./lib/components/Home.svelte";
   import ToolEmpty from "./lib/components/ToolEmpty.svelte";
   import CompressTool from "./lib/components/CompressTool.svelte";
@@ -100,5 +101,9 @@
 
   {#if app.settingsOpen}
     <SettingsPopover />
+  {/if}
+
+  {#if app.aboutOpen}
+    <AboutDialog />
   {/if}
 </div>

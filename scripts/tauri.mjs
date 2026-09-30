@@ -4,12 +4,23 @@ import { hostname } from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { appVersion } from "./version.mjs";
 
 const targetDir = "D:\\majipdf-target";
 const projectRoot = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const binDir = path.join(projectRoot, "node_modules", ".bin");
 
-const cli = spawn("tauri", process.argv.slice(2), {
+// dev/build get the computed version as a config overlay (exe file version, getVersion()).
+const args = process.argv.slice(2);
+if (args[0] === "dev" || args[0] === "build") {
+  const overlay = path.join(tmpdir(), "majipdf-version.conf.json");
+  writeFileSync(overlay, JSON.stringify({ version: appVersion() }));
+  args.splice(1, 0, "--config", `"${overlay}"`);
+}
+
+const cli = spawn("tauri", args, {
   stdio: "inherit",
   shell: true,
   env: {
