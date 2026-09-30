@@ -4,7 +4,7 @@
   import { fmtSize, fmtPages, fmtNum } from "../format";
   import { chooseFiles } from "../tauri";
   import { addFilesToTool } from "../files";
-  import { isLocked, runnable, outName, nameValid, startRun, cancelRun, move, processAnother } from "../merge";
+  import { isLocked, runnable, outName, nameValid, nameError, startRun, cancelRun, move, processAnother } from "../merge";
   import ToolFrame from "./ToolFrame.svelte";
   import PasswordForm from "./PasswordForm.svelte";
   import SignedDialog from "./SignedDialog.svelte";
@@ -27,6 +27,7 @@
   );
   const name = $derived(outName());
   const nameBad = $derived(!nameValid());
+  const nameErrKey = $derived(nameError() || "nameErr");
   let signedOpen = $state(false);
 
   function onrun() {
@@ -198,7 +199,7 @@
       autocomplete="off"
       style="height:44px;padding:0 12px;border-radius:10px;border:1px solid {nameBad ? 'var(--err)' : 'var(--line2)'};background:var(--surface);color:var(--text);font-size:15px"
     />
-    {#if nameBad}<div role="alert" style="color:var(--err);font-size:14px">{t("nameErr")}</div>{/if}
+    {#if nameBad}<div role="alert" style="color:var(--err);font-size:14px">{t(nameErrKey)}</div>{/if}
   </div>
 
   <button

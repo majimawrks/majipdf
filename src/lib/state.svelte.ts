@@ -1,3 +1,5 @@
+import { clearThumbCache } from "./thumbcache";
+
 export type Lang = "en" | "id";
 export type Theme = "auto" | "light" | "dark";
 export type OutMode = "next" | "folder";
@@ -201,6 +203,7 @@ export const app = $state({
   },
   tool: {
     phase: "empty" as "empty" | "loaded" | "running" | "done" | "error",
+    cancelling: false, // Cancel pressed; stays until the running call settles (the backend may still be cleaning up)
     files: [] as FileInfo[],
   },
   compress: {
@@ -217,6 +220,7 @@ export const app = $state({
       progress: {} as Record<number, CompressProgress>,
       results: [] as CompressResult[],
       keep: {} as Record<number, "busy" | "kept" | "discarded" | "failed">,
+      keepErr: {} as Record<number, string>, // error text of a failed Keep, for "Copy details"
       tries: {} as Record<number, number>, // highest size-limit attempt seen per file
       locked: [] as string[], // names of locked files left out of the run
       error: "",
@@ -276,15 +280,42 @@ export const app = $state({
   notice: "" as string,
 });
 
+export const isRunning = () => app.tool.phase === "running";
+
+// Called by every tool when its run call settles. True = the outcome was a cancel or a backend "busy"
+// and the phase has been put back (to `back`), so the caller returns without showing a result or error.
+export function settled(err: unknown, back: "loaded" | "done" = "loaded"): boolean {
+  if (!app.tool.cancelling && err !== "cancelled" && err !== "busy") return false;
+  if (err === "busy") app.notice = "busy";
+  app.tool.cancelling = false;
+  app.tool.phase = back;
+  return true;
+}
+
+// Cancel: show "Cancelling…" and ask the backend; the run call settling (see settled) ends it.
+export async function requestCancel(cancel: () => Promise<void>) {
+  if (app.tool.cancelling) return;
+  app.tool.cancelling = true;
+  try {
+    await cancel();
+  } catch {
+    // ponytail: backend already stopped or nothing running; the run call still settles.
+  }
+}
+
 export function goHome() {
+  if (isRunning()) return;
+  clearThumbCache();
   app.route = "home";
   app.settingsOpen = false;
   app.notice = "";
 }
 
 export function openTool(id: ToolId, files: FileInfo[] = []) {
+  if (isRunning()) return;
+  clearThumbCache();
   app.route = id;
-  app.tool = { phase: files.length ? "loaded" : "empty", files };
+  app.tool = { phase: files.length ? "loaded" : "empty", cancelling: false, files };
   app.compress.passwords = {};
   app.compress.skipped = [];
   app.merge.name = "";

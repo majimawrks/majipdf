@@ -1,6 +1,6 @@
 // Shared logic for turning dropped/chosen paths into app state, used by both
 // the native drag-drop listener (App.svelte) and the "Choose files" buttons.
-import { app } from "./state.svelte";
+import { app, isRunning } from "./state.svelte";
 import { fileInfo } from "./tauri";
 import { replaceFile } from "./split";
 import { replaceFile as replaceOrganizeFile } from "./organize";
@@ -8,6 +8,7 @@ import { replaceFile as replaceWordFile } from "./word";
 import { replaceFile as replaceExcelFile } from "./excel";
 
 export async function addFilesToHome(paths: string[]) {
+  if (isRunning()) return;
   const infos = await fileInfo(paths);
   const pdfs = infos.filter((f) => f.is_pdf);
   if (!pdfs.length) {
@@ -19,7 +20,9 @@ export async function addFilesToHome(paths: string[]) {
 }
 
 export async function addFilesToTool(paths: string[]) {
+  if (isRunning()) return; // no new input while a job runs
   const infos = await fileInfo(paths);
+  if (isRunning()) return;
   const pdfs = infos.filter((f) => f.is_pdf);
   if (!pdfs.length) {
     app.notice = "notPdf";

@@ -9,6 +9,7 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $word = $null
 $doc = $null
 $newPid = $null
+$scriptStart = Get-Date
 
 function Out-Line {
     param([string]$Text)
@@ -16,18 +17,30 @@ function Out-Line {
     [Console]::Out.Flush()
 }
 
-function Get-StrayPid {
-    param([int[]]$Before)
-    Start-Sleep -Milliseconds 500
-    $after = Get-Process WINWORD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
-    return ($after | Where-Object { $Before -notcontains $_ } | Select-Object -First 1)
+function Get-OwnPid {
+    # Our Office = not in the before-snapshot, COM-launched (/Automation), started after this script did.
+    param([int[]]$Before, [string]$Image)
+    for ($i = 0; $i -lt 40; $i++) {
+        $p = Get-CimInstance Win32_Process -Filter "Name='$Image'" -ErrorAction SilentlyContinue |
+            Where-Object { $Before -notcontains [int]$_.ProcessId -and $_.CommandLine -like '*/Automation*' -and $_.CreationDate -ge $scriptStart } |
+            Select-Object -First 1
+        if ($p) { return [int]$p.ProcessId }
+        Start-Sleep -Milliseconds 250
+    }
+    return $null
+}
+
+function Test-OwnPid {
+    param([int]$ProcId, [string]$Image)
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
+    return [bool]($p -and $p.Name -eq $Image -and $p.CommandLine -like '*/Automation*' -and $p.CreationDate -ge $scriptStart)
 }
 
 try {
-    $beforePids = Get-Process WINWORD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+    $beforePids = @(Get-Process WINWORD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 
     $word = New-Object -ComObject Word.Application
-    $newPid = Get-StrayPid -Before $beforePids
+    $newPid = Get-OwnPid -Before $beforePids -Image 'WINWORD.EXE'
     if ($newPid) { Out-Line "PID $newPid" }
 
     $word.Visible = $false
@@ -35,7 +48,7 @@ try {
     $word.AutomationSecurity = 3   # msoAutomationSecurityForceDisable (belt & suspenders, no macros)
 
     Out-Line "STAGE converting"
-    $inPath = (Resolve-Path $In).Path
+    $inPath = (Resolve-Path -LiteralPath $In).Path
 
     # Documents.Open(FileName, ConfirmConversions, ReadOnly, AddToRecentFiles, PasswordDocument)
     # NOTE: passing the full ~16-arg COM signature with trailing $null values makes
@@ -52,7 +65,7 @@ try {
     # $PWD/Set-Location in some hosts and writes the file to the wrong folder).
     $outPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
     $outDir = Split-Path $outPath -Parent
-    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
+    if (-not (Test-Path -LiteralPath $outDir)) { [void][IO.Directory]::CreateDirectory($outDir) }
 
     Out-Line "STAGE saving"
     # wdFormatXMLDocument = 16
@@ -82,8 +95,8 @@ finally {
     [GC]::Collect()
     if ($newPid) {
         Start-Sleep -Milliseconds 500
-        $stray = Get-Process -Id $newPid -ErrorAction SilentlyContinue
-        if ($stray) {
+        # only ever our own COM-launched instance; a user's Word (or a reused pid) fails the check
+        if (Test-OwnPid -ProcId $newPid -Image 'WINWORD.EXE') {
             try { Stop-Process -Id $newPid -Force -ErrorAction SilentlyContinue } catch {}
         }
     }

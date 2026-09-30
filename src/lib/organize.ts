@@ -1,5 +1,5 @@
 // Organize tool logic: pure page-list operations, then the state-backed load/insert/run part.
-import { app, settings, openTool, type FileInfo, type OrgPage } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel, type FileInfo, type OrgPage } from "./state.svelte";
 import * as api from "./tauri";
 
 type Sel = ReadonlySet<number>;
@@ -166,11 +166,12 @@ export async function startRun() {
       pages: o.pages.map((p) => ({ src: p.src, page: p.page, rotation: norm(p.rotation) as 0 | 90 | 180 | 270 })),
       out_mode: settings.outMode,
     });
+    if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e) || id !== runId) return;
     r.error = String(e);
     app.tool.phase = "error";
   } finally {
@@ -178,14 +179,6 @@ export async function startRun() {
   }
 }
 
-export async function cancelRun() {
-  runId++; // ignore anything the running call still reports
-  app.tool.phase = "loaded"; // page list, selection and sources untouched
-  try {
-    await api.organizeCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.organizeCancel);
 
 export const processAnother = () => openTool("organize");

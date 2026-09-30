@@ -1,5 +1,5 @@
 //! Split tool backend. See _docs/split-contract.md.
-use crate::compress::{self, move_file, size_of, stamp, temp_root, CANCEL};
+use crate::compress::{self, size_of, stamp, temp_root, CANCEL};
 use crate::pdf::{self, Opened};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,8 +67,14 @@ fn part_paths(dir: &Path, stem: &str, n: usize, exists: impl Fn(&Path) -> bool) 
     }
 }
 
+/// Removes files this run claimed.
+fn rollback(claimed: &[PathBuf]) {
+    for p in claimed {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 fn do_split(req: &SplitRequest, out_dir: &Path, emit: &dyn Fn(&SplitProgress)) -> Result<SplitResult, String> {
-    CANCEL.store(false, Ordering::SeqCst);
     let src_path = Path::new(&req.path);
     let pw = req.password.as_deref().filter(|p| !p.is_empty());
     let pages = match pdf::open(src_path, pw) {
@@ -107,17 +113,47 @@ fn split_in(req: &SplitRequest, src_path: &Path, pw: Option<&str>, out_dir: &Pat
     }
     std::fs::create_dir_all(out_dir).map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
     let stem = src_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "split".into());
-    let dests = part_paths(out_dir, &stem, total, |p| p.exists());
-    let mut moved: Vec<&PathBuf> = Vec::new();
-    for (t, d) in temps.iter().zip(&dests) {
-        if let Err(e) = move_file(t, d) {
-            for m in moved {
-                let _ = std::fs::remove_file(m);
+    // Publish: first claim every destination no-clobber (create_new); a name taken meanwhile releases our
+    // claims and retries the set on the next " (n)" suffix. Then fill the claimed files. Cancel is honoured
+    // between fills; a cancelled/failed run removes ONLY the files it claimed.
+    let mut claimed: Vec<PathBuf> = Vec::new();
+    let mut dests = Vec::new();
+    for _ in 0..50 {
+        dests = part_paths(out_dir, &stem, total, |p| p.exists());
+        claimed.clear();
+        let mut clash = false;
+        for d in &dests {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(d) {
+                Ok(_) => claimed.push(d.clone()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    clash = true;
+                    break;
+                }
+                Err(e) => {
+                    rollback(&claimed);
+                    return Err(format!("cannot write {}: {e}", d.display()));
+                }
             }
-            let _ = std::fs::remove_file(d);
+        }
+        if !clash {
+            break;
+        }
+        rollback(&claimed);
+        claimed.clear();
+    }
+    if claimed.len() != total {
+        return Err("output names kept colliding".into());
+    }
+    for (t, d) in temps.iter().zip(&dests) {
+        // Commit point is the claim above; from here a cancel still rolls the whole (all-or-nothing) set back.
+        if CANCEL.load(Ordering::SeqCst) {
+            rollback(&claimed);
+            return Err(CANCELLED.into());
+        }
+        if let Err(e) = std::fs::copy(t, d) {
+            rollback(&claimed);
             return Err(format!("cannot write {}: {e}", d.display()));
         }
-        moved.push(d);
     }
     let outputs = dests.iter().zip(&req.groups).map(|(d, g)| Output { path: d.display().to_string(), from: g.from, to: g.to, size: size_of(d) }).collect();
     Ok(SplitResult { folder: out_dir.display().to_string(), outputs })
@@ -125,7 +161,9 @@ fn split_in(req: &SplitRequest, src_path: &Path, pw: Option<&str>, out_dir: &Pat
 
 #[tauri::command]
 pub async fn split(app: tauri::AppHandle, req: SplitRequest) -> Result<SplitResult, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // released only after do_split (incl. temp cleanup) returns
         let dir = if req.out_mode == "folder" {
             compress::folder_dir(&app)
         } else {

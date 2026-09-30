@@ -4,7 +4,7 @@ mod engine;
 
 use crate::compress::{self, place, size_of, stamp, temp_root, CANCEL};
 use crate::pdf::{self, Opened};
-use crate::word::{hidden, parse_line, prepare_copy, Line};
+use crate::word::{hidden, kill_owned, parse_line, prepare_copy, sys32, Line};
 use engine::{Options, SheetMode, CANCELLED};
 use pdfium_render::prelude::{PdfiumError, PdfiumInternalError};
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,6 @@ type Job = fn(&ExcelRequest, &Path, &Path, &dyn Fn(&ExcelProgress), std::time::I
 
 /// Every path converts inside a fresh temp dir (Excel `SaveAs` into OneDrive fails; cancel leaves nothing behind).
 fn run_in_work_dir(req: &ExcelRequest, out_dir: &Path, emit: &dyn Fn(&ExcelProgress), job: Job) -> Result<ExcelResult, String> {
-    CANCEL.store(false, Ordering::SeqCst);
     let start = std::time::Instant::now();
     let work = temp_root().join(stamp());
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -102,11 +101,11 @@ fn convert_own(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&E
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static EXCEL_PID: AtomicU32 = AtomicU32::new(0);
 
-/// Kills only the EXCEL.EXE the script reported (never the user's own Excel), then the powershell child.
+/// Kills only the EXCEL.EXE the script reported (verified COM-launched, never the user's own Excel), then the powershell child.
 fn kill_all() {
     let pid = EXCEL_PID.load(Ordering::SeqCst);
     if pid != 0 {
-        let _ = hidden(Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null())).status();
+        kill_owned(pid, "EXCEL.EXE");
     }
     if let Some(c) = CHILD.lock().unwrap().as_mut() {
         let _ = c.kill();
@@ -128,7 +127,7 @@ fn convert_excel(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(
         return Err(CANCELLED.into());
     }
 
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(sys32("powershell.exe"));
     cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
         .arg(&script)
         .arg("-In")
@@ -192,7 +191,9 @@ fn convert_excel(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(
 
 #[tauri::command]
 pub async fn excel_convert(app: tauri::AppHandle, req: ExcelRequest) -> Result<ExcelResult, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // held until convert() has cleaned up
         let dir = if req.out_mode == "folder" {
             compress::folder_dir(&app)
         } else {
@@ -237,6 +238,7 @@ mod tests {
     }
 
     fn out_dir(name: &str) -> PathBuf {
+        CANCEL.store(false, Ordering::SeqCst); // tests call convert() directly, without job::begin()
         let d = std::env::temp_dir().join(name);
         let _ = std::fs::remove_dir_all(&d);
         d

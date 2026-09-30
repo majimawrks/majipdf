@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::path::Path;
 
 mod compress;
+mod job;
 mod merge;
 mod organize;
 mod pdf;
@@ -17,12 +18,17 @@ struct OfficeStatus {
 
 /// Directories expand recursively to their `.pdf` files.
 #[tauri::command]
-fn file_info(paths: Vec<String>) -> Vec<pdf::FileInfo> {
-    let mut files = Vec::new();
-    for p in &paths {
-        pdf::expand(Path::new(p), &mut files);
-    }
-    files.iter().filter_map(|f| pdf::info(f, f.display().to_string())).collect()
+async fn file_info(paths: Vec<String>) -> Vec<pdf::FileInfo> {
+    // Off the IPC thread: pdfium may be locked by a running conversion.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut files = Vec::new();
+        for p in &paths {
+            pdf::expand(Path::new(p), &mut files);
+        }
+        files.iter().filter_map(|f| pdf::info(f, f.display().to_string())).collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[derive(Serialize)]
@@ -34,11 +40,14 @@ struct UnlockResult {
 }
 
 #[tauri::command]
-fn unlock(path: String, password: String) -> UnlockResult {
-    match pdf::open(Path::new(&path), Some(&password)) {
+async fn unlock(path: String, password: String) -> UnlockResult {
+    let none = UnlockResult { ok: false, pages: None, signed: false, scanned: false };
+    tauri::async_runtime::spawn_blocking(move || match pdf::open(Path::new(&path), Some(&password)) {
         pdf::Opened::Ok { pages, signed } => UnlockResult { ok: true, pages: Some(pages), signed, scanned: pdf::is_scanned(Path::new(&path), Some(&password)) },
         _ => UnlockResult { ok: false, pages: None, signed: false, scanned: false },
-    }
+    })
+    .await
+    .unwrap_or(none)
 }
 
 #[cfg(windows)]
@@ -64,6 +73,13 @@ fn office_status_impl() -> OfficeStatus {
     }
 }
 
+/// Called by an inline script in index.html as soon as the preloader markup is parsed (before the
+/// app bundle loads), so the hidden window appears with the preloader instead of an empty WebView.
+#[tauri::command]
+fn show_window(window: tauri::WebviewWindow) {
+    let _ = window.show();
+}
+
 #[tauri::command]
 fn office_status() -> OfficeStatus {
     office_status_impl()
@@ -72,11 +88,24 @@ fn office_status() -> OfficeStatus {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Off the startup path: a big leftover (e.g. a 50 MB scan's temp) shouldn't delay the window.
-    std::thread::spawn(|| compress::sweep_temp(std::time::Duration::from_secs(6 * 3600)));
+    std::thread::spawn(compress::sweep_temp);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // The window starts hidden and the frontend shows it after its first paint (main.ts).
+            // Fallback so a broken/slow page can never leave the app invisible.
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    let _ = w.show();
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             file_info,
+            show_window,
             unlock,
             office_status,
             compress::compress,

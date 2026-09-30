@@ -181,30 +181,80 @@ pub(crate) fn size_of(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
+/// Publishes `from` at `to` and never replaces an existing file: `to` is claimed with `create_new`
+/// (fails with AlreadyExists if anything is there), the content is copied in, then `from` is removed.
+/// On any failure the claimed (partial) `to` is removed again; it is ours, we just created it.
+// ponytail: always copies (no same-volume rename): std::fs::rename replaces on Windows. Add MoveFileExW
+// without MOVEFILE_REPLACE_EXISTING if copying huge outputs ever hurts.
 pub(crate) fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::rename(from, to).or_else(|_| {
-        std::fs::copy(from, to)?;
-        std::fs::remove_file(from)
-    })
+    let mut src = std::fs::File::open(from)?;
+    let mut dst = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    if let Err(e) = std::io::copy(&mut src, &mut dst).and_then(|_| dst.sync_all()) {
+        drop(dst);
+        let _ = std::fs::remove_file(to);
+        return Err(e);
+    }
+    drop(dst);
+    drop(src);
+    std::fs::remove_file(from)
 }
 
 pub(crate) fn temp_root() -> PathBuf {
     std::env::temp_dir().join("majipdf")
 }
 
-/// Deletes entries in `temp_root()` last modified more than `max_age` ago: work dirs left by a
-/// crash/close mid-run and Compress `miss_*.pdf` results the user never kept or discarded.
-// ponytail: age-based, so a second running majipdf never loses an in-flight job; a crash's
-// leftovers wait until a launch ≥ max_age later. Track owner pids if that ever matters.
-pub(crate) fn sweep_temp(max_age: std::time::Duration) {
+/// `<pid>` of a temp entry: work dirs `<pid>_<nanos>`, results `miss_<pid>_<nanos>.pdf`.
+fn owner_pid(name: &str) -> Option<u32> {
+    let s = name.strip_prefix("miss_").map(|s| s.strip_suffix(".pdf").unwrap_or(s)).unwrap_or(name);
+    let (pid, nanos) = s.split_once('_')?;
+    nanos.parse::<u128>().ok()?;
+    pid.parse().ok()
+}
+
+/// Sweep rule: owner known -> gone AND older than 1 h; unparseable -> older than 24 h.
+fn sweepable(name: &str, age: std::time::Duration, live: &std::collections::HashSet<u32>) -> bool {
+    const H: u64 = 3600;
+    match owner_pid(name) {
+        Some(pid) => !live.contains(&pid) && age.as_secs() > H,
+        None => age.as_secs() > 24 * H,
+    }
+}
+
+pub(crate) fn system_exe(rel: &str) -> PathBuf {
+    PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into())).join(rel)
+}
+
+/// Pids of running processes; None if it cannot be determined (then nothing is swept).
+fn live_pids() -> Option<std::collections::HashSet<u32>> {
+    let mut cmd = Command::new(system_exe(r"System32\tasklist.exe"));
+    cmd.args(["/FO", "CSV", "/NH"]).stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW
+    let out = cmd.output().ok().filter(|o| o.status.success())?;
+    let mut set: std::collections::HashSet<u32> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split("\",\"").nth(1)?.trim_matches('"').parse().ok())
+        .collect();
+    set.insert(std::process::id());
+    (set.len() > 1).then_some(set)
+}
+
+/// Deletes entries in `temp_root()` whose owning majipdf process is gone (crash/close mid-run work
+/// dirs, Compress `miss_*.pdf` never kept or discarded) and that are older than 1 h. Reparse points are skipped.
+pub(crate) fn sweep_temp() {
     let Ok(entries) = std::fs::read_dir(temp_root()) else { return };
+    let Some(live) = live_pids() else { return };
     for e in entries.flatten() {
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > max_age);
-        if !old {
+        let Ok(md) = std::fs::symlink_metadata(e.path()) else { continue };
+        if pdf::is_reparse(&md) {
+            continue;
+        }
+        let age = md.modified().ok().and_then(|t| t.elapsed().ok()).unwrap_or_default();
+        if !sweepable(&e.file_name().to_string_lossy(), age, &live) {
             continue;
         }
         let p = e.path();
-        let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+        let _ = if md.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
     }
 }
 
@@ -213,11 +263,18 @@ pub(crate) fn stamp() -> String {
     format!("{}_{n}", std::process::id())
 }
 
+/// Moves `work_file` to a free name in `out_dir` without ever replacing an existing file.
 pub(crate) fn place(work_file: &Path, out_dir: &Path, stem: &str, suffix: &str, ext: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
-    let out = output_name(out_dir, stem, suffix, ext, |p| p.exists());
-    move_file(work_file, &out).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
-    Ok(out)
+    for _ in 0..1000 {
+        let out = output_name(out_dir, stem, suffix, ext, |p| p.exists());
+        match move_file(work_file, &out) {
+            Ok(()) => return Ok(out),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue, // lost a race: next number
+            Err(e) => return Err(format!("cannot write {}: {e}", out.display())),
+        }
+    }
+    Err(format!("no free file name in {}", out_dir.display()))
 }
 
 /// Err(()) = cancelled. Everything else is reported inside the result.
@@ -342,7 +399,6 @@ fn run_all(
     out_dir_for: &dyn Fn(&Path) -> PathBuf,
     emit: &dyn Fn(&CompressProgress),
 ) -> Result<Vec<CompressResult>, String> {
-    CANCEL.store(false, Ordering::SeqCst);
     let work = temp_root().join(stamp());
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let mut results: Vec<CompressResult> = Vec::new();
@@ -378,7 +434,9 @@ pub(crate) fn folder_dir(app: &tauri::AppHandle) -> PathBuf {
 
 #[tauri::command]
 pub async fn compress(app: tauri::AppHandle, req: CompressRequest) -> Result<Vec<CompressResult>, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // released only after run_all (incl. temp cleanup) returns
         let docs = folder_dir(&app);
         let folder = req.out_mode == "folder";
         run_all(
@@ -399,32 +457,57 @@ pub fn compress_cancel() {
     kill_child();
 }
 
-#[tauri::command]
-pub fn keep_result(app: tauri::AppHandle, temp: String, original: String, out_mode: String) -> Result<String, String> {
-    let orig = Path::new(&original);
-    let dir = if out_mode == "folder" { folder_dir(&app) } else { orig.parent().map(Path::to_path_buf).unwrap_or_default() };
-    let stem = orig.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "output".into());
-    place(Path::new(&temp), &dir, &stem, "_compressed", "pdf").map(|p| p.display().to_string())
+/// A pending Compress result: a file directly inside `temp_root()` named `miss_*.pdf` (no `..`).
+fn pending_result(temp: &str) -> Result<PathBuf, String> {
+    let p = Path::new(temp);
+    let bad = || format!("not a pending result: {temp}");
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(bad());
+    }
+    let file = p.canonicalize().map_err(|_| bad())?;
+    let root = temp_root().canonicalize().map_err(|_| bad())?;
+    let name = file.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if file.parent() != Some(root.as_path()) || !file.is_file() || !name.starts_with("miss_") || !name.ends_with(".pdf") {
+        return Err(bad());
+    }
+    Ok(file)
 }
 
 #[tauri::command]
-pub fn discard_result(temp: String) {
-    let p = Path::new(&temp);
-    if p.starts_with(temp_root()) {
-        let _ = std::fs::remove_file(p);
-    }
+pub fn keep_result(app: tauri::AppHandle, temp: String, original: String, out_mode: String) -> Result<String, String> {
+    let temp = pending_result(&temp)?;
+    let orig = Path::new(&original);
+    let dir = if out_mode == "folder" { folder_dir(&app) } else { orig.parent().map(Path::to_path_buf).unwrap_or_default() };
+    let stem = orig.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "output".into());
+    place(&temp, &dir, &stem, "_compressed", "pdf").map(|p| p.display().to_string())
+}
+
+#[tauri::command]
+pub fn discard_result(temp: String) -> Result<(), String> {
+    std::fs::remove_file(pending_result(&temp)?).map_err(|e| e.to_string())
+}
+
+fn explorer() -> Command {
+    Command::new(system_exe("explorer.exe"))
 }
 
 // ponytail: explorer.exe instead of tauri-plugin-opener (no new dependency/capability); Windows only, revisit for the macOS build.
 #[tauri::command]
 pub fn open_path(path: String) {
-    let _ = Command::new("explorer.exe").arg(path).spawn();
+    let p = Path::new(&path);
+    let ok_ext = p.extension().is_some_and(|e| ["pdf", "docx", "xlsx"].iter().any(|x| e.eq_ignore_ascii_case(x)));
+    if ok_ext && p.is_file() {
+        let _ = explorer().arg(p).spawn();
+    }
 }
 
 #[tauri::command]
 pub fn reveal_path(path: String) {
-    let mut cmd = Command::new("explorer.exe");
-    // explorer only parses `/select,"C:\a b\x.pdf"`; Rust's auto-quoting of the whole arg breaks paths with spaces.
+    if path.contains('"') {
+        return;
+    }
+    let mut cmd = explorer();
+    // explorer only parses /select,"<path>" as one raw arg; Rust auto-quoting breaks paths with spaces.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::raw_arg(&mut cmd, format!("/select,\"{path}\""));
     let _ = cmd.spawn();
@@ -440,6 +523,74 @@ mod tests {
         let p = output_name(Path::new("d"), "a", "_compressed", "pdf", |p| taken.contains(&p.to_path_buf()));
         assert_eq!(p, PathBuf::from("d/a_compressed (3).pdf"));
         assert_eq!(output_name(Path::new("d"), "b", "_compressed", "pdf", |_| false), PathBuf::from("d/b_compressed.pdf"));
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("majipdf_test_{tag}_{}", stamp()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn place_never_clobbers() {
+        let d = scratch("place");
+        std::fs::write(d.join("a_compressed.pdf"), b"OLD").unwrap();
+        let w = d.join("work.pdf");
+        std::fs::write(&w, b"NEW").unwrap();
+        let out = place(&w, &d, "a", "_compressed", "pdf").unwrap();
+        assert_eq!(out, d.join("a_compressed (2).pdf"));
+        assert_eq!(std::fs::read(d.join("a_compressed.pdf")).unwrap(), b"OLD");
+        assert_eq!(std::fs::read(&out).unwrap(), b"NEW");
+        assert!(!w.exists());
+        // move_file onto an existing file fails and leaves both untouched
+        std::fs::write(&w, b"X").unwrap();
+        let e = move_file(&w, &out).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&out).unwrap(), b"NEW");
+        assert!(w.exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn result_path_guard() {
+        let root = temp_root();
+        std::fs::create_dir_all(&root).unwrap();
+        let good = root.join(format!("miss_{}.pdf", stamp()));
+        std::fs::write(&good, b"x").unwrap();
+        assert!(pending_result(&good.display().to_string()).is_ok());
+        let other = root.join(format!("other_{}.pdf", stamp()));
+        std::fs::write(&other, b"x").unwrap();
+        assert!(pending_result(&other.display().to_string()).is_err()); // not miss_*
+        let dotdot = root.join("..").join(good.file_name().unwrap());
+        assert!(pending_result(&dotdot.display().to_string()).is_err());
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("miss_x.pdf"), b"x").unwrap();
+        assert!(pending_result(&sub.join("miss_x.pdf").display().to_string()).is_err()); // not directly inside
+        assert!(discard_result(other.display().to_string()).is_err());
+        assert!(other.exists());
+        assert!(discard_result(good.display().to_string()).is_ok());
+        assert!(!good.exists());
+        let _ = std::fs::remove_file(&other);
+        let _ = std::fs::remove_dir_all(&sub);
+    }
+
+    #[test]
+    fn sweep_rules() {
+        use std::time::Duration;
+        let live: std::collections::HashSet<u32> = [100].into();
+        let (old, young) = (Duration::from_secs(7200), Duration::from_secs(60));
+        assert_eq!(owner_pid("100_1234567"), Some(100));
+        assert_eq!(owner_pid("miss_100_1234567.pdf"), Some(100));
+        assert_eq!(owner_pid("junk"), None);
+        assert_eq!(owner_pid("a_b"), None);
+        assert!(!sweepable("100_5", old, &live)); // owner alive
+        assert!(!sweepable("miss_100_5.pdf", old, &live));
+        assert!(!sweepable("200_5", young, &live)); // dead but young
+        assert!(sweepable("200_5", old, &live));
+        assert!(sweepable("miss_200_5.pdf", old, &live));
+        assert!(!sweepable("junk", old, &live)); // unparseable: 24 h
+        assert!(sweepable("junk", Duration::from_secs(25 * 3600), &live));
     }
 
     #[test]
@@ -508,7 +659,7 @@ mod tests {
                 r.before, r.after, r.status, r.output, r.temp, r.error, events.get()
             );
             if let Some(t) = &r.temp {
-                discard_result(t.clone());
+                let _ = discard_result(t.clone());
             }
         }
     }

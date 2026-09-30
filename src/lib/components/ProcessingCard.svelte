@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { app } from "../state.svelte";
   import { onMount } from "svelte";
   import { t } from "../i18n";
   import { fmtElapsed } from "../format";
@@ -42,7 +43,8 @@
       </div>
       <button
         onclick={oncancel}
-        style="min-height:44px;padding:0 22px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:16px;cursor:pointer">{t("cancel")}</button
+        disabled={app.tool.cancelling}
+        style="min-height:44px;padding:0 22px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:16px;cursor:{app.tool.cancelling ? 'default' : 'pointer'}">{app.tool.cancelling ? t("cancelling") : t("cancel")}</button
       >
     </div>
   </div>

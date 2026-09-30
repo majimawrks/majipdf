@@ -74,7 +74,8 @@
       </div>
       <button
         onclick={cancelRun}
-        style="min-height:44px;padding:0 22px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:16px;cursor:pointer">{t("cancel")}</button
+        disabled={app.tool.cancelling}
+        style="min-height:44px;padding:0 22px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:16px;cursor:{app.tool.cancelling ? 'default' : 'pointer'}">{app.tool.cancelling ? t("cancelling") : t("cancel")}</button
       >
     </div>
   </div>

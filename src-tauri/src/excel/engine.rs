@@ -1,7 +1,7 @@
 //! Own PDF -> XLSX engine ("engine b", spike iteration 5): pdfium text + ruling-line lattice -> rust_xlsxwriter.
 //! Ported from `_spike/rust/src/main.rs` with the heuristics untouched. See _docs/excel-contract.md.
 use pdfium_render::prelude::*;
-use rust_xlsxwriter::{Format, FormatAlign, FormatBorder, FormatUnderline, Image, Workbook, Worksheet};
+use rust_xlsxwriter::{XlsxError, Format, FormatAlign, FormatBorder, FormatUnderline, Image, Workbook, Worksheet};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -911,7 +911,7 @@ pub fn convert(
             None => {
                 let worksheet = workbook.add_worksheet();
                 worksheet.set_name(format!("Page{}", page_idx + 1)).ok();
-                match write_page(doc, &page, worksheet, 0, &mut fc, opts.numbers) {
+                match write_page(doc, &page, worksheet, 0, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
                     None => empty_pages += 1,
                     Some(p) => {
                         for (c, w) in p.widths.iter().enumerate() {
@@ -926,7 +926,7 @@ pub fn convert(
                     }
                 }
             }
-            Some(worksheet) => match write_page(doc, &page, worksheet, next_row, &mut fc, opts.numbers) {
+            Some(worksheet) => match write_page(doc, &page, worksheet, next_row, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
                 None => empty_pages += 1,
                 Some(p) => {
                     if next_row > 0 {
@@ -961,6 +961,9 @@ pub fn convert(
 
     progress("writing", pages, pages);
     workbook.save(out).map_err(|e| format!("failed to save {}: {e}", out.display()))?;
+    if cancel.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into()); // caller's work dir (holding the saved file) is removed
+    }
     Ok(Stats { pages, empty_pages })
 }
 
@@ -981,12 +984,12 @@ fn write_page(
     base: u32,
     fc: &mut FormatCache,
     numbers_mode: bool,
-) -> Option<PageOut> {
+) -> Result<Option<PageOut>, XlsxError> {
         let page_w = page.width().value as f64;
         let page_h = page.height().value as f64;
         let words = build_words(&page, page_h);
         if words.is_empty() {
-            return None;
+            return Ok(None);
         }
         let (mut horiz_raw, vert_raw) = page_path_segments(&page, page_h);
 
@@ -1281,7 +1284,7 @@ fn write_page(
                             &style,
                             fc,
                             numbers_mode,
-                        );
+                        )?;
                         continue;
                     }
                     idxs.sort_by(|&a, &b| {
@@ -1323,7 +1326,7 @@ fn write_page(
                         &style,
                         fc,
                         numbers_mode,
-                    );
+                    )?;
                 }
             }
         }
@@ -1392,7 +1395,7 @@ fn write_page(
                 };
                 let underline = dominant_underline(&words, group, &underline_lines);
                 let style = CellStyle { size, bold, italic, font_name, align_h, underline, ..CellStyle::plain(size, bold) };
-                write_cell(worksheet, row, col as u16, &text, &style, fc, numbers_mode);
+                write_cell(worksheet, row, col as u16, &text, &style, fc, numbers_mode)?;
             }
         }
 
@@ -1464,7 +1467,7 @@ fn write_page(
         let bottom_in = ((page_h - content_max_y) / 72.0).max(0.2);
         let header_in = (top_in * 0.5).min(top_in);
         let footer_in = (bottom_in * 0.5).min(bottom_in);
-        Some(PageOut {
+        Ok(Some(PageOut {
             rows: r2 - base,
             widths: (0..grid.ncols()).map(|c| pt_to_excel_col_width(grid.xs[c + 1] - grid.xs[c])).collect(),
             setup: PageSetup {
@@ -1472,7 +1475,7 @@ fn write_page(
                 paper: paper_size_code(page_w, page_h),
                 margins: [left_in, right_in, top_in, bottom_in, header_in, footer_in],
             },
-        })
+        }))
 }
 
 /// `numbers_mode`: false (default) writes every cell as the exact source text, string-typed, so
@@ -1486,22 +1489,23 @@ fn write_cell(
     style: &CellStyle,
     fc: &mut FormatCache,
     numbers_mode: bool,
-) {
+) -> Result<(), XlsxError> {
     match numbers_mode.then(|| parse_number_cell(text)).flatten() {
         Some((n, _is_percent, fmt)) => {
             let f = fc.get(false, &fmt, style);
-            worksheet.write_number_with_format(row, col, n, &f).ok();
+            worksheet.write_number_with_format(row, col, n, &f)?;
         }
         // Stacked values ("100,00\n10\n10,00") need wrap or Excel shows them run together.
         None if text.contains('\n') => {
             let f = fc.get(true, "", style);
-            worksheet.write_string_with_format(row, col, text, &f).ok();
+            worksheet.write_string_with_format(row, col, text, &f)?;
         }
         None => {
             let f = fc.get(false, "", style);
-            worksheet.write_string_with_format(row, col, text, &f).ok();
+            worksheet.write_string_with_format(row, col, text, &f)?;
         }
     };
+    Ok(())
 }
 
 /// Like write_cell, but for a (possibly merged) cell range. rust_xlsxwriter's merge_range only
@@ -1517,20 +1521,26 @@ fn write_cell_span(
     style: &CellStyle,
     fc: &mut FormatCache,
     numbers_mode: bool,
-) {
+) -> Result<(), XlsxError> {
     if r0 == r1 && c0 == c1 {
-        write_cell(worksheet, r0, c0, text, style, fc, numbers_mode);
-        return;
+        return write_cell(worksheet, r0, c0, text, style, fc, numbers_mode);
     }
     let wrap = text.contains('\n');
     let text_fmt = fc.get(wrap, "", style);
-    worksheet.merge_range(r0, c0, r1, c1, text, &text_fmt).ok();
+    match worksheet.merge_range(r0, c0, r1, c1, text, &text_fmt) {
+        // The lattice heuristics occasionally produce overlapping spans (scan_ocr_96 p.35). That's our
+        // layout guess going wrong, not a failed write: keep the text in the top-left cell, unmerged,
+        // instead of failing the whole workbook (the spike silently dropped the text here).
+        Err(XlsxError::MergeRangeOverlaps(..)) => return write_cell(worksheet, r0, c0, text, style, fc, numbers_mode),
+        r => r?,
+    };
     if numbers_mode {
         if let Some((n, _is_percent, num_fmt)) = parse_number_cell(text) {
             let nf = fc.get(false, &num_fmt, style);
-            worksheet.write_number_with_format(r0, c0, n, &nf).ok();
+            worksheet.write_number_with_format(r0, c0, n, &nf)?;
         }
     }
+    Ok(())
 }
 
 /// Builds an Excel number format from how many decimals the source text had. Always uses a

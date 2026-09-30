@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app, settings } from "./lib/state.svelte";
+  import { t } from "./lib/i18n";
   import { inTauri, officeStatus, flashIfUnfocused } from "./lib/tauri";
   import { addFilesToHome, addFilesToTool } from "./lib/files";
   import Header from "./lib/components/Header.svelte";
@@ -66,6 +67,10 @@
 
 <div class="app-root">
   <Header />
+
+  {#if app.notice === "busy" && !isHome}
+    <div role="alert" style="padding:10px 16px;background:var(--warn-soft);color:var(--text)">{t("busy")}</div>
+  {/if}
 
   <main style="flex:1;min-height:0;display:flex;flex-direction:column">
     {#if isHome}

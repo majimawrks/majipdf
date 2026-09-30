@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="163 163 1605 1605">
+  <!-- majipdf app icon: page with folded corner wearing an eyepatch. Redrawn from _assets/majipdf_eyepatch.jpg -->
+  <rect x="193" y="193" width="1545" height="1545" rx="180" fill="#6a45b8"/>
+  <path d="M563 412H1159L1419 660V1469Q1419 1519 1369 1519H563Q513 1519 513 1469V462Q513 412 563 412Z" fill="#fff"/>
+  <path d="M1015 405C955 530 900 610 840 690M650 860C605 885 565 900 513 912" fill="none" stroke="#1b1b1e" stroke-width="56"/>
+  <path d="M640 770L800 655Q845 628 882 680L905 712Q960 790 900 870L842 914Q762 968 690 912Q652 882 634 846Q607 800 640 770Z" fill="#1b1b1e"/>
+  <path d="M563 412H1159L1419 660V1469Q1419 1519 1369 1519H563Q513 1519 513 1469V462Q513 412 563 412ZM1159 412V657H1419" fill="none" stroke="#1b1b1e" stroke-width="52" stroke-linejoin="round"/>
+  <path d="M650 1161H1282V1223H650ZM650 1308H1282V1370H650Z" fill="#1b1b1e"/>
+</svg>

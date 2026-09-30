@@ -270,5 +270,9 @@
   "xlsErrTitle": "Couldn't convert this file to Excel",
   "xlsErrBody": "Something went wrong while converting {f}. Try again, or use \"Copy details for IT\" and send it to your IT team.",
   "xlsMissingTitle": "Microsoft Excel isn't available",
-  "xlsMissingBody": "The other method needs Microsoft Excel on this computer. Your first file is still saved."
+  "xlsMissingBody": "The other method needs Microsoft Excel on this computer. Your first file is still saved.",
+  "cancelling": "Cancelling…",
+  "busy": "Another task is still finishing. Try again in a moment.",
+  "nameReserved": "That name is reserved by Windows. Try another.",
+  "nameLong": "That name is too long. Use 150 characters or fewer."
 }

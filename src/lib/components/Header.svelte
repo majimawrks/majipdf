@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { app, settings, goHome, saveSettings } from "../state.svelte";
+  import { app, settings, goHome, saveSettings, isRunning } from "../state.svelte";
   import { t } from "../i18n";
+  import logo from "../../../src-tauri/icons/icon.svg"; // single source for app + header icon
 
   const inTool = $derived(app.route !== "home");
   const toolName = $derived(inTool ? t(`${app.route}Name` as any) : "");
@@ -16,13 +17,11 @@
 >
   <button
     onclick={goHome}
+    aria-disabled={isRunning()}
     aria-label="majipdf — home"
-    style="display:flex;align-items:center;gap:9px;background:none;border:0;padding:6px 8px;border-radius:10px;cursor:pointer;color:var(--text);flex-shrink:0"
+    style="display:flex;align-items:center;gap:9px;background:none;border:0;padding:6px 8px;border-radius:10px;cursor:pointer;color:var(--text);flex-shrink:0;opacity:{isRunning() ? 0.5 : 1}"
   >
-    <span
-      style="width:28px;height:28px;border-radius:9px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink)"
-      ><i class="ph-fill ph-drop" style="font-size:16px"></i></span
-    >
+    <img src={logo} alt="" width="30" height="30" style="display:block" />
     <span style="font-weight:700;font-size:18px;letter-spacing:-0.01em;white-space:nowrap"
       >maji<span style="color:var(--accent-text)">pdf</span></span
     >
@@ -32,8 +31,9 @@
     <span style="width:1px;height:22px;background:var(--line);flex-shrink:0"></span>
     <button
       onclick={goHome}
-      style="display:flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border-radius:9px;border:0;background:none;color:var(--text2);font-size:15px;cursor:pointer;flex-shrink:0;white-space:nowrap"
-      class="hover-surface2"
+      aria-disabled={isRunning()}
+      style="opacity:{isRunning() ? 0.5 : 1};display:flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border-radius:9px;border:0;background:none;color:var(--text2);font-size:15px;cursor:pointer;flex-shrink:0;white-space:nowrap"
+      class:hover-surface2={!isRunning()}
     >
       <i class="ph ph-arrow-left" style="font-size:16px"></i>{t("allTools")}
     </button>

@@ -70,11 +70,32 @@ pub(crate) fn hidden(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// `%SystemRoot%\System32\<exe>`: Windows tools are never resolved through PATH/CWD.
+pub(crate) fn sys32(exe: &str) -> PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let mut p = PathBuf::from(root).join("System32");
+    if exe.eq_ignore_ascii_case("powershell.exe") {
+        p = p.join("WindowsPowerShell").join("v1.0");
+    }
+    p.join(exe)
+}
+
+/// Force-kills `pid` (and its tree) only if it is still a COM-launched `image` (WINWORD.EXE / EXCEL.EXE:
+/// command line has `/Automation`), so a reused pid or the user's own Office is never touched.
+pub(crate) fn kill_owned(pid: u32, image: &str) {
+    let check = format!("$p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; if($p -and $p.Name -eq '{image}' -and $p.CommandLine -like '*/Automation*'){{exit 0}}else{{exit 1}}");
+    let mut c = Command::new(sys32("powershell.exe"));
+    c.args(["-NoProfile", "-NonInteractive", "-Command", &check]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    if hidden(&mut c).status().is_ok_and(|s| s.success()) {
+        let _ = hidden(Command::new(sys32("taskkill.exe")).args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null())).status();
+    }
+}
+
 /// Kills only the WINWORD the script reported (and its tree, e.g. PDFREFLOW.EXE), then the powershell child.
 fn kill_all() {
     let pid = WORD_PID.load(Ordering::SeqCst);
     if pid != 0 {
-        let _ = hidden(Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null())).status();
+        kill_owned(pid, "WINWORD.EXE");
     }
     if let Some(c) = CHILD.lock().unwrap().as_mut() {
         let _ = c.kill();
@@ -119,7 +140,6 @@ fn convert(req: &WordRequest, out_dir: &Path, emit: &dyn Fn(&WordProgress)) -> R
     if !crate::office_status().word {
         return Err("word_missing".into());
     }
-    CANCEL.store(false, Ordering::SeqCst);
     WORD_PID.store(0, Ordering::SeqCst);
     let start = std::time::Instant::now();
     let work = temp_root().join(stamp());
@@ -141,7 +161,7 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
         return Err(CANCELLED.into());
     }
 
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(sys32("powershell.exe"));
     cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
         .arg(&script)
         .arg("-In")
@@ -213,7 +233,9 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
 
 #[tauri::command]
 pub async fn word_convert(app: tauri::AppHandle, req: WordRequest) -> Result<WordResult, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // held until convert() has cleaned up
         let dir = if req.out_mode == "folder" {
             compress::folder_dir(&app)
         } else {
@@ -269,6 +291,7 @@ mod tests {
     }
 
     fn out_dir(name: &str) -> PathBuf {
+        CANCEL.store(false, Ordering::SeqCst); // tests call convert() directly, without job::begin()
         let d = std::env::temp_dir().join(name);
         let _ = std::fs::remove_dir_all(&d);
         d

@@ -3,7 +3,7 @@
   import { t } from "../i18n";
   import { fmtSize } from "../format";
   import { keep, discard, processAnother } from "../compress";
-  import { openPath, revealPath } from "../tauri";
+  import { openPath, revealPath, copyText } from "../tauri";
 
   const run = app.compress.run;
   const GRID = "minmax(0,1fr) 84px 84px 64px";
@@ -37,6 +37,11 @@
   const primary = btn + "border:0;background:var(--accent);color:var(--accent-ink);font-weight:600";
   const secondary = btn + "border:1px solid var(--line2);background:var(--surface);color:var(--text)";
   const quiet = btn + "border:0;background:none;color:var(--accent-text);font-weight:600";
+
+  let copied = $state<Record<number, boolean>>({});
+  async function copyDetails(i: number) {
+    copied[i] = await copyText(run.results[i].error || run.keepErr[i] || "");
+  }
 
   function noteFor(i: number): string {
     const r = run.results[i];
@@ -117,7 +122,15 @@
             <div
               style="margin-left:26px;padding:8px 12px;border-radius:10px;background:{bad || k === 'failed' ? 'var(--err-soft)' : 'var(--surface2)'};color:var(--text2);font-size:14.5px"
             >
-              {note}
+              <div>{note}</div>
+              {#if (bad && r.error) || (k === "failed" && run.keepErr[i])}
+                <button
+                  onclick={() => copyDetails(i)}
+                  style="margin-top:6px;display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:9px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:14px;cursor:pointer"
+                >
+                  <i class="ph ph-{copied[i] ? 'check' : 'copy'}" style="font-size:16px"></i>{copied[i] ? t("copied") : t("copyDetails")}
+                </button>
+              {/if}
             </div>
           {/if}
         </div>

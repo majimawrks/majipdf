@@ -13,7 +13,13 @@ pub fn bundled(rel_exe: &str, rel_tools: &str) -> PathBuf {
             return p;
         }
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(rel_tools)
+    #[cfg(debug_assertions)]
+    return Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(rel_tools);
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = rel_tools;
+        PathBuf::from(rel_exe) // not found next to the exe: fail to load rather than search the build tree
+    }
 }
 
 pub(crate) fn pdfium() -> Result<MutexGuard<'static, Pdfium>, String> {
@@ -85,19 +91,55 @@ pub fn info(path: &Path, shown: String) -> Option<FileInfo> {
     Some(FileInfo { path: shown, name, size_bytes: meta.len(), is_pdf, pages, encrypted, signed, damaged, scanned })
 }
 
-/// Directories expand recursively to their `.pdf` files.
+/// Symlink / junction / other reparse point: never followed when expanding folders or sweeping temp.
+pub(crate) fn is_reparse(md: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::MetadataExt::file_attributes(md) & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
+    }
+    #[cfg(not(windows))]
+    {
+        md.file_type().is_symlink()
+    }
+}
+
+const MAX_DEPTH: usize = 12;
+const MAX_PDFS: usize = 2000;
+
+/// Directories expand (iteratively, in name order) to their `.pdf` files; junctions/symlinks are skipped,
+/// depth is capped at 12 and `out` at 2,000 files.
+// ponytail: hitting a cap just stops silently (no `truncated` flag); add one to FileInfo's caller if users hit it.
 pub fn expand(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_dir() {
-        let Ok(rd) = std::fs::read_dir(path) else { return };
+    if !path.is_dir() {
+        out.push(path.to_path_buf());
+        return;
+    }
+    // Stack of (path, depth, is_dir); children are pushed reversed so pops come out in name order.
+    let mut stack = vec![(path.to_path_buf(), 0usize, true)];
+    while let Some((p, depth, is_dir)) = stack.pop() {
+        if !is_dir {
+            if out.len() >= MAX_PDFS {
+                return;
+            }
+            out.push(p);
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&p) else { continue };
         let mut kids: Vec<_> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
         kids.sort();
-        for k in kids {
-            if k.is_dir() || k.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
-                expand(&k, out);
+        for k in kids.into_iter().rev() {
+            let Ok(md) = std::fs::symlink_metadata(&k) else { continue };
+            if is_reparse(&md) {
+                continue;
+            }
+            if md.is_dir() {
+                if depth < MAX_DEPTH {
+                    stack.push((k, depth + 1, true));
+                }
+            } else if k.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+                stack.push((k, depth, false));
             }
         }
-    } else {
-        out.push(path.to_path_buf());
     }
 }
 
@@ -151,5 +193,49 @@ mod tests {
         assert!(scanned_from(&[80.0])); // threshold inclusive
         assert!(!scanned_from(&[79.9]));
         assert!(!scanned_from(&[])); // nothing sampled
+    }
+
+    #[test]
+    fn expand_caps_and_junctions() {
+        let root = std::env::temp_dir().join(format!("majipdf_test_expand_{}", crate::compress::stamp()));
+        let sub = root.join("a");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(root.join("x.pdf"), b"").unwrap();
+        std::fs::write(root.join("note.txt"), b"").unwrap();
+        std::fs::write(sub.join("y.PDF"), b"").unwrap();
+        let mut v = Vec::new();
+        expand(&root, &mut v);
+        assert_eq!(v, vec![sub.join("y.PDF"), root.join("x.pdf")]);
+        // junction back to the root: must not be followed
+        #[cfg(windows)]
+        {
+            let cmd = crate::compress::system_exe(r"System32\cmd.exe");
+            let mut c = std::process::Command::new(cmd);
+            std::os::windows::process::CommandExt::raw_arg(&mut c, format!("/C mklink /J \"{}\" \"{}\"", sub.join("loop").display(), root.display()));
+            let st = c.output().unwrap();
+            assert!(st.status.success(), "mklink failed {:?} -> {:?}: {} {}", sub.join("loop"), root, String::from_utf8_lossy(&st.stdout), String::from_utf8_lossy(&st.stderr));
+            let mut v = Vec::new();
+            expand(&root, &mut v);
+            assert_eq!(v.len(), 2);
+            std::fs::remove_dir(sub.join("loop")).unwrap(); // removes only the junction
+        }
+        // depth cap
+        let mut deep = root.join("d");
+        for i in 0..15 {
+            deep = deep.join(format!("l{i}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.pdf"), b"").unwrap();
+        let mut v = Vec::new();
+        expand(&root, &mut v);
+        assert!(!v.iter().any(|p| p.ends_with("deep.pdf")));
+        // count cap
+        for i in 0..MAX_PDFS + 50 {
+            std::fs::write(sub.join(format!("f{i:05}.pdf")), b"").unwrap();
+        }
+        let mut v = Vec::new();
+        expand(&root, &mut v);
+        assert_eq!(v.len(), MAX_PDFS);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1,5 +1,5 @@
 // PDF -> Word: state-backed run logic. Word gives no page progress, so the UI shows a time estimate.
-import { app, settings, openTool, type FileInfo } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const w = app.word;
@@ -31,11 +31,12 @@ export async function startRun() {
   });
   try {
     const res = await api.wordConvert({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode });
+    if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e) || id !== runId) return;
     if (e === "word_missing") {
       app.tool.phase = "loaded";
       app.office = await api.officeStatus();
@@ -49,15 +50,7 @@ export async function startRun() {
   }
 }
 
-export async function cancelRun() {
-  runId++;
-  app.tool.phase = "loaded";
-  try {
-    await api.wordCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.wordCancel);
 
 export const processAnother = () => openTool("word");
 export const retry = () => (app.tool.phase = "loaded");

@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>majipdf</title>
+    <style>
+      /* Theme colours before any CSS/JS loads (tokens from app.css), so the window never flashes. */
+      html { background: #f7f7f8; --boot-accent: #7a55c4; --boot-track: #e5e5e8; }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]) { background: #131315; --boot-accent: #a98ceb; --boot-track: #303035; }
+      }
+      html[data-theme="dark"] { background: #131315; --boot-accent: #a98ceb; --boot-track: #303035; }
+      html, body { margin: 0; height: 100%; }
+      /* Preloader: pure HTML/CSS, visible from the first frame; main.ts removes it after mount. */
+      #boot { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 22px; }
+      #boot svg { width: 76px; height: 76px; animation: boot-pulse 1.6s ease-in-out infinite; }
+      #boot .bar { width: 120px; height: 4px; border-radius: 2px; background: var(--boot-track); overflow: hidden; }
+      #boot .bar::after { content: ""; display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--boot-accent); animation: boot-slide 1.1s ease-in-out infinite; }
+      @keyframes boot-pulse { 50% { transform: scale(0.94); opacity: 0.85; } }
+      @keyframes boot-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { #boot svg, #boot .bar::after { animation: none; } }
+    </style>
     <script>
       // Applied before first paint (synchronous, blocking) to avoid a flash of the wrong theme.
       (function () {
@@ -19,6 +36,23 @@
     </script>
   </head>
   <body>
+    <div id="boot" aria-label="Loading majipdf" role="status">
+      <!-- same drawing as src-tauri/icons/icon.svg -->
+      <svg viewBox="163 163 1605 1605" aria-hidden="true">
+        <rect x="193" y="193" width="1545" height="1545" rx="180" fill="#6a45b8"/>
+        <path d="M563 412H1159L1419 660V1469Q1419 1519 1369 1519H563Q513 1519 513 1469V462Q513 412 563 412Z" fill="#fff"/>
+        <path d="M1015 405C955 530 900 610 840 690M650 860C605 885 565 900 513 912" fill="none" stroke="#1b1b1e" stroke-width="56"/>
+        <path d="M640 770L800 655Q845 628 882 680L905 712Q960 790 900 870L842 914Q762 968 690 912Q652 882 634 846Q607 800 640 770Z" fill="#1b1b1e"/>
+        <path d="M563 412H1159L1419 660V1469Q1419 1519 1369 1519H563Q513 1519 513 1469V462Q513 412 563 412ZM1159 412V657H1419" fill="none" stroke="#1b1b1e" stroke-width="52" stroke-linejoin="round"/>
+        <path d="M650 1161H1282V1223H650ZM650 1308H1282V1370H650Z" fill="#1b1b1e"/>
+      </svg>
+      <div class="bar"></div>
+    </div>
+    <script>
+      // Show the (hidden-at-start) window now that the preloader is in the DOM, before the app bundle
+      // loads. Tauri's IPC is injected before page scripts; in a plain browser this is a no-op.
+      try { window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke("show_window"); } catch (e) {}
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

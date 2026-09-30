@@ -270,5 +270,9 @@
   "xlsErrTitle": "File ini tidak bisa diubah ke Excel",
   "xlsErrBody": "Terjadi masalah saat mengubah {f}. Coba lagi, atau pakai \"Salin detail untuk tim TI\" lalu kirim ke tim TI.",
   "xlsMissingTitle": "Microsoft Excel tidak tersedia",
-  "xlsMissingBody": "Metode lain membutuhkan Microsoft Excel di komputer ini. File pertama Anda tetap tersimpan."
+  "xlsMissingBody": "Metode lain membutuhkan Microsoft Excel di komputer ini. File pertama Anda tetap tersimpan.",
+  "cancelling": "Membatalkan…",
+  "busy": "Tugas lain masih diselesaikan. Coba lagi sebentar lagi.",
+  "nameReserved": "Nama itu dipakai oleh Windows. Coba nama lain.",
+  "nameLong": "Nama terlalu panjang. Gunakan maksimal 150 karakter."
 }

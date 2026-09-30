@@ -1,5 +1,5 @@
 // Compress tool logic: what is runnable, running, cancelling, keep/discard.
-import { app, settings, openTool, type FileInfo } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const c = app.compress;
@@ -28,10 +28,12 @@ export async function startRun() {
   r.results = [];
   r.keep = {};
   r.tries = {};
+  r.keepErr = {};
   r.error = "";
   r.locked = app.tool.files.filter(isLocked).map((f) => f.name);
   app.tool.phase = "running";
   const unlisten = await api.onCompressProgress((p) => {
+    if (settled(undefined)) return;
     if (id !== runId) return;
     r.progress[p.index] = p;
     if (p.attempt) r.tries[p.index] = Math.max(r.tries[p.index] ?? 0, p.attempt);
@@ -49,7 +51,7 @@ export async function startRun() {
     r.results = results;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e) || id !== runId) return;
     r.error = String(e);
     app.tool.phase = "error";
   } finally {
@@ -57,15 +59,7 @@ export async function startRun() {
   }
 }
 
-export async function cancelRun() {
-  runId++; // ignore anything the running call still reports
-  app.tool.phase = "loaded"; // options and files are untouched
-  try {
-    await api.compressCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.compressCancel);
 
 export async function keep(i: number) {
   const res = c.run.results[i];
@@ -75,7 +69,8 @@ export async function keep(i: number) {
     const out = await api.keepResult(res.temp, res.path, settings.outMode);
     res.output = out;
     c.run.keep[i] = "kept";
-  } catch {
+  } catch (e) {
+    c.run.keepErr[i] = String(e);
     c.run.keep[i] = "failed";
   }
 }

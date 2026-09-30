@@ -1,5 +1,5 @@
 // Merge tool logic: what is runnable, running, cancelling, reordering.
-import { app, settings, openTool } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel } from "./state.svelte";
 import * as api from "./tauri";
 import { isLocked, runnable } from "./compress";
 
@@ -13,10 +13,15 @@ export const outName = () => {
   const first = runnable()[0] ?? app.tool.files[0];
   return first ? stem(first.name) + "_merged" : "merged";
 };
-export const nameValid = () => {
+// "" when fine, else the i18n key of the problem.
+export const nameError = (): "" | "nameErr" | "nameReserved" | "nameLong" => {
   const n = outName().trim();
-  return n.length > 0 && !/[\\/:*?"<>|]/.test(n) && !/^[. ]+$/.test(n);
+  if (!n || /[\\/:*?"<>|]/.test(n) || /^[. ]+$/.test(n)) return "nameErr";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(n.split(".")[0].trim())) return "nameReserved"; // with or without an extension
+  if (stem(n).length > 150) return "nameLong";
+  return "";
 };
+export const nameValid = () => nameError() === "";
 
 let runId = 0;
 
@@ -42,11 +47,12 @@ export async function startRun() {
       compress: r.compress,
       out_mode: settings.outMode,
     });
+    if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e) || id !== runId) return;
     r.error = String(e);
     app.tool.phase = "error";
   } finally {
@@ -54,15 +60,7 @@ export async function startRun() {
   }
 }
 
-export async function cancelRun() {
-  runId++; // ignore anything the running call still reports
-  app.tool.phase = "loaded"; // files, order and options are untouched
-  try {
-    await api.mergeCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.mergeCancel);
 
 export function move(from: number, to: number) {
   const f = app.tool.files;

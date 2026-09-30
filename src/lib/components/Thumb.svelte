@@ -1,10 +1,6 @@
-<script module lang="ts">
-  // path|page|width|password -> data URL. Shared by every tool that shows page thumbnails.
-  const cache = new Map<string, string>();
-</script>
-
 <script lang="ts">
   import { thumbnail } from "../tauri";
+  import { getThumb, putThumb } from "../thumbcache";
 
   let {
     path,
@@ -22,17 +18,17 @@
   // Fetch only once the box is visible; 2x the display width keeps it sharp on high-DPI screens.
   $effect(() => {
     const w = width * 2;
-    const key = `${path}|${page}|${w}|${password ?? ""}`;
-    const hit = cache.get(key);
+    const pw = password; // tracked: unlocking a file re-fetches (the cache key has no password)
+    const hit = getThumb(path, page, w);
     src = hit ?? "";
     if (hit) return;
     let dead = false;
     const io = new IntersectionObserver((es) => {
       if (!es.some((e) => e.isIntersecting)) return;
       io.disconnect();
-      thumbnail(path, password, page, w)
+      thumbnail(path, pw, page, w)
         .then((u) => {
-          cache.set(key, u);
+          putThumb(path, page, w, u, !!pw);
           if (!dead) src = u;
         })
         .catch(() => {}); // placeholder stays

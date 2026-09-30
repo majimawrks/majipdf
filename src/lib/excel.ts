@@ -1,6 +1,6 @@
 // PDF -> Excel: state-backed run logic. Own engine (fast, page progress) first; the Excel engine
 // is only a "Not right? Try the other method" fallback from the first Done card.
-import { app, settings, openTool, type FileInfo } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const x = app.excel;
@@ -14,6 +14,7 @@ export function replaceFile(f: FileInfo) {
 }
 
 let runId = 0;
+const back = () => (x.run.engine === "excel" && x.run.result ? "done" : "loaded"); // fallback cancelled -> first Done card
 
 async function run(engine: "own" | "excel") {
   const f = app.tool.files[0];
@@ -41,12 +42,13 @@ async function run(engine: "own" | "excel") {
       numbers: x.numbers,
       out_mode: settings.outMode,
     });
+    if (settled(undefined, back())) return;
     if (id !== runId) return;
     if (engine === "own") r.result = res;
     else r.v2 = res;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e, back()) || id !== runId) return;
     r.error = String(e);
     app.tool.phase = "error";
   } finally {
@@ -57,15 +59,7 @@ async function run(engine: "own" | "excel") {
 export const startRun = () => run("own");
 export const tryOtherMethod = () => run("excel");
 
-export async function cancelRun() {
-  runId++;
-  app.tool.phase = x.run.engine === "excel" && x.run.result ? "done" : "loaded"; // fallback cancelled -> first Done card
-  try {
-    await api.excelCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.excelCancel);
 
 export const processAnother = () => openTool("excel");
-export const retry = () => (app.tool.phase = x.run.engine === "excel" && x.run.result ? "done" : "loaded");
+export const retry = () => (app.tool.phase = back());

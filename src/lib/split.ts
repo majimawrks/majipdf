@@ -1,5 +1,5 @@
 // Split tool logic: turning the user's choice into page groups, and running/cancelling.
-import { app, settings, openTool, type FileInfo } from "./state.svelte";
+import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 export type Group = { from: number; to: number };
@@ -92,11 +92,12 @@ export async function startRun(groups: Group[]) {
       groups,
       out_mode: settings.outMode,
     });
+    if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;
     app.tool.phase = "done";
   } catch (e) {
-    if (id !== runId || e === "cancelled") return;
+    if (settled(e) || id !== runId) return;
     r.error = String(e);
     app.tool.phase = "error";
   } finally {
@@ -104,14 +105,6 @@ export async function startRun(groups: Group[]) {
   }
 }
 
-export async function cancelRun() {
-  runId++; // ignore anything the running call still reports
-  app.tool.phase = "loaded"; // file and options untouched
-  try {
-    await api.splitCancel();
-  } catch {
-    // ponytail: backend already stopped or nothing running; nothing to recover.
-  }
-}
+export const cancelRun = () => requestCancel(api.splitCancel);
 
 export const processAnother = () => openTool("split");

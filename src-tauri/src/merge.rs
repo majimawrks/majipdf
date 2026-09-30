@@ -40,8 +40,16 @@ pub struct MergeResult {
 /// Strips `\/:*?"<>|` and control chars, then trailing dots/spaces; empty -> "merged".
 fn sanitize(name: &str) -> String {
     let s: String = name.chars().filter(|c| !"\\/:*?\"<>|".contains(*c) && !c.is_control()).collect();
-    let s = s.trim_start().trim_end_matches(['.', ' ']);
-    if s.is_empty() { "merged".into() } else { s.into() }
+    let s: String = s.trim_start().chars().take(150).collect();
+    let s = s.trim_end_matches(['.', ' ']);
+    if s.is_empty() {
+        return "merged".into();
+    }
+    // Reserved Windows device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9), also before an extension, get a `_`.
+    let base = s.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|p| base.strip_prefix(p).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")));
+    if reserved { format!("{s}_") } else { s.into() }
 }
 
 const CANCELLED: &str = "cancelled";
@@ -51,7 +59,6 @@ fn name_of(p: &str) -> String {
 }
 
 fn do_merge(req: &MergeRequest, out_dir: &Path, emit: &dyn Fn(&MergeProgress)) -> Result<MergeResult, String> {
-    CANCEL.store(false, Ordering::SeqCst);
     if req.files.len() < 2 {
         return Err("need at least 2 files".into());
     }
@@ -112,13 +119,19 @@ fn merge_in(req: &MergeRequest, out_dir: &Path, work: &Path, total: u32, emit: &
             }
         }
     }
+    // Commit point: past this check the output is published and returned, never reported as cancelled.
+    if CANCEL.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into());
+    }
     let out = place(&best, out_dir, &sanitize(&req.output_name), "", "pdf")?;
     Ok(MergeResult { output: out.display().to_string(), pages: total, size: size_of(&out), files: req.files.len() })
 }
 
 #[tauri::command]
 pub async fn merge(app: tauri::AppHandle, req: MergeRequest) -> Result<MergeResult, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // released only after do_merge (incl. temp cleanup) returns
         let dir = if req.out_mode == "folder" {
             compress::folder_dir(&app)
         } else {
@@ -150,7 +163,7 @@ fn render_thumb(path: &Path, password: Option<&str>, page: u32, width: u32) -> R
     let doc = p.load_pdf_from_file(path, password).map_err(|e| e.to_string())?;
     let pg = doc.pages().get(page.try_into().map_err(|_| "bad page".to_string())?).map_err(|e| e.to_string())?;
     let img = pg
-        .render_with_config(&PdfRenderConfig::new().set_target_width(width.max(1) as i32))
+        .render_with_config(&PdfRenderConfig::new().set_target_width(width.clamp(16, 1200) as i32))
         .map_err(|e| e.to_string())?
         .as_image()
         .map_err(|e| e.to_string())?
@@ -171,6 +184,13 @@ mod tests {
         assert_eq!(sanitize("  "), "merged");
         assert_eq!(sanitize("report. . "), "report");
         assert_eq!(sanitize("ok name"), "ok name");
+        assert_eq!(sanitize("con"), "con_");
+        assert_eq!(sanitize("NUL.txt"), "NUL.txt_");
+        assert_eq!(sanitize("Com1"), "Com1_");
+        assert_eq!(sanitize("lpt9. "), "lpt9_");
+        assert_eq!(sanitize("com10"), "com10");
+        assert_eq!(sanitize("console"), "console");
+        assert_eq!(sanitize(&"x".repeat(300)).len(), 150);
     }
 
     #[test]

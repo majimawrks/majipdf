@@ -72,7 +72,6 @@ fn to_rot(deg: u32) -> PdfPageRenderRotation {
 }
 
 fn do_organize(req: &OrganizeRequest, out_dir: &Path, emit: &dyn Fn(&OrganizeProgress)) -> Result<OrganizeResult, String> {
-    CANCEL.store(false, Ordering::SeqCst);
     let first = req.sources.first().ok_or("no sources")?;
     let mut counts = Vec::new();
     for s in &req.sources {
@@ -117,6 +116,7 @@ fn organize_in(req: &OrganizeRequest, work: &Path, out_dir: &Path, first: &Sourc
         }
         out.save_to_file(&tmp).map_err(|e| e.to_string())?;
     }
+    // Commit point: past this check the output is published and returned, never reported as cancelled.
     if CANCEL.load(Ordering::SeqCst) {
         return Err(CANCELLED.into());
     }
@@ -127,7 +127,9 @@ fn organize_in(req: &OrganizeRequest, work: &Path, out_dir: &Path, first: &Sourc
 
 #[tauri::command]
 pub async fn organize(app: tauri::AppHandle, req: OrganizeRequest) -> Result<OrganizeResult, String> {
+    let guard = crate::job::begin()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard; // released only after do_organize (incl. temp cleanup) returns
         let first = req.sources.first().ok_or("no sources")?;
         let dir = if req.out_mode == "folder" {
             compress::folder_dir(&app)

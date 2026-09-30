@@ -8,6 +8,7 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $excel = $null
 $wb = $null
 $newPid = $null
+$scriptStart = Get-Date
 
 function Out-Line {
     param([string]$Text)
@@ -15,11 +16,36 @@ function Out-Line {
     [Console]::Out.Flush()
 }
 
-function Get-StrayPid {
+function Get-OwnPid {
+    # Our Office = not in the before-snapshot, COM-launched (/Automation), started after this script did.
+    param([int[]]$Before, [string]$Image)
+    for ($i = 0; $i -lt 40; $i++) {
+        $p = Get-CimInstance Win32_Process -Filter "Name='$Image'" -ErrorAction SilentlyContinue |
+            Where-Object { $Before -notcontains [int]$_.ProcessId -and $_.CommandLine -like '*/Automation*' -and $_.CreationDate -ge $scriptStart } |
+            Select-Object -First 1
+        if ($p) { return [int]$p.ProcessId }
+        Start-Sleep -Milliseconds 250
+    }
+    return $null
+}
+
+function Test-OwnPid {
+    param([int]$ProcId, [string]$Image)
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
+    return [bool]($p -and $p.Name -eq $Image -and $p.CommandLine -like '*/Automation*' -and $p.CreationDate -ge $scriptStart)
+}
+
+Add-Type -Namespace MajiPdf -Name Win -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint pid);'
+
+function Get-ExcelPid {
+    # Exact pid from the Excel window handle; falls back to the /Automation + start-time rule.
     param([int[]]$Before)
-    Start-Sleep -Milliseconds 500
-    $after = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
-    return ($after | Where-Object { $Before -notcontains $_ } | Select-Object -First 1)
+    try {
+        $x = [uint32]0
+        [void][MajiPdf.Win]::GetWindowThreadProcessId([IntPtr]$excel.Hwnd, [ref]$x)
+        if ($x -gt 0 -and $Before -notcontains [int]$x -and (Test-OwnPid -ProcId ([int]$x) -Image 'EXCEL.EXE')) { return [int]$x }
+    } catch {}
+    return (Get-OwnPid -Before $Before -Image 'EXCEL.EXE')
 }
 
 # Parses an Indonesian-formatted number string ("1.204.500", "73,5", "0,00",
@@ -47,10 +73,10 @@ function ConvertFrom-IndoNumber {
 }
 
 try {
-    $beforePids = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+    $beforePids = @(Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 
     $excel = New-Object -ComObject Excel.Application
-    $newPid = Get-StrayPid -Before $beforePids
+    $newPid = Get-ExcelPid -Before $beforePids
     if ($newPid) { Out-Line "PID $newPid" }
 
     $excel.Visible = $false
@@ -59,7 +85,7 @@ try {
     $excel.AskToUpdateLinks = $false
     $excel.AutomationSecurity = 3   # msoAutomationSecurityForceDisable
 
-    $inPath = (Resolve-Path $In).Path
+    $inPath = (Resolve-Path -LiteralPath $In).Path
     $mPath = $inPath -replace '\\', '\\'
 
     $wb = $excel.Workbooks.Add()
@@ -176,16 +202,14 @@ in
 
     $outPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
     $outDir = Split-Path $outPath -Parent
-    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
+    if (-not (Test-Path -LiteralPath $outDir)) { [void][IO.Directory]::CreateDirectory($outDir) }
 
     Out-Line "STAGE saving"
-    $tempPath = Join-Path $env:TEMP ("majipdf_xlsx_" + [Guid]::NewGuid().ToString('N') + ".xlsx")
-    $wb.SaveAs($tempPath, 51)  # xlOpenXMLWorkbook
+    # Save straight into the backend-owned work dir ($outDir): no plaintext staging anywhere else.
+    if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
+    $wb.SaveAs($outPath, 51)  # xlOpenXMLWorkbook
     $wb.Close($false)
     $wb = $null
-
-    if (Test-Path $outPath) { Remove-Item $outPath -Force }
-    Move-Item -Path $tempPath -Destination $outPath -Force
 
     $excel.Quit()
     $sw.Stop()
@@ -212,8 +236,8 @@ finally {
     [GC]::Collect()
     if ($newPid) {
         Start-Sleep -Milliseconds 500
-        $stray = Get-Process -Id $newPid -ErrorAction SilentlyContinue
-        if ($stray) {
+        # only ever our own COM-launched instance; a user's Excel (or a reused pid) fails the check
+        if (Test-OwnPid -ProcId $newPid -Image 'EXCEL.EXE') {
             try { Stop-Process -Id $newPid -Force -ErrorAction SilentlyContinue } catch {}
         }
     }
