@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { appVersion } from "./version.mjs";
 
 const targetDir = process.env.MAJIPDF_TARGET_DIR || "D:\\majipdf-target";
@@ -19,12 +19,23 @@ if (args[0] === "dev" || args[0] === "build") {
   args.splice(1, 0, "--config", `"${overlay}"`);
 }
 
+// Release builds: strip local paths (user profile, project folder) that rustc embeds in panic
+// messages and debug info, so a published exe doesn't reveal the builder's username or folders.
+const extraEnv = {};
+if (args[0] === "build") {
+  const home = homedir();
+  const remap = [`--remap-path-prefix=${home}=~`, `--remap-path-prefix=${projectRoot}=majipdf`];
+  // CARGO_ENCODED_RUSTFLAGS (0x1f-separated): plain RUSTFLAGS splits on spaces, and paths have them.
+  extraEnv.CARGO_ENCODED_RUSTFLAGS = remap.join("\x1f");
+}
+
 const cli = spawn("tauri", args, {
   stdio: "inherit",
   shell: true,
   env: {
     ...process.env,
     CARGO_TARGET_DIR: targetDir,
+    ...extraEnv,
     PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
   },
 });
