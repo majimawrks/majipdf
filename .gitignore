@@ -1,6 +1,10 @@
 # Local-only folders (handoffs, samples, refs, scratch)
 _*/
 
+# AI assistant local config
+CLAUDE.md
+.claude/
+
 # App
 node_modules/
 dist/
