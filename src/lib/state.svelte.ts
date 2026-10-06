@@ -1,5 +1,7 @@
 import { clearThumbCache } from "./thumbcache";
 
+export const isMac = /Mac/.test(navigator.userAgent);
+
 export type Lang = "en" | "id";
 export type Theme = "auto" | "light" | "dark";
 export type OutMode = "next" | "folder";
@@ -171,7 +173,7 @@ interface Settings {
 }
 
 const SETTINGS_KEY = "majipdf.settings";
-const DEFAULT_SETTINGS: Settings = { lang: "en", theme: "auto", outMode: "next", outFolder: "Documents\\majipdf" };
+const DEFAULT_SETTINGS: Settings = { lang: "en", theme: "auto", outMode: "next", outFolder: isMac ? "Documents/majipdf" : "Documents\\majipdf" };
 
 function loadSettings(): Settings {
   try {

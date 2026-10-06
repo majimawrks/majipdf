@@ -1,6 +1,7 @@
-import type { ToolId } from "./state.svelte";
+import { isMac, type ToolId } from "./state.svelte";
 
-export const TOOL_ORDER: ToolId[] = ["compress", "merge", "split", "organize", "word", "excel"];
+// Word for Mac can't import PDFs, so PDF to Word isn't offered there.
+export const TOOL_ORDER: ToolId[] = (["compress", "merge", "split", "organize", "word", "excel"] as ToolId[]).filter((id) => !(isMac && id === "word"));
 
 export const TOOL_ICON: Record<ToolId, string> = {
   compress: "ph ph-arrows-in",

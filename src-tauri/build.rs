@@ -1,5 +1,6 @@
 fn main() {
-    if std::env::var("PROFILE").as_deref() == Ok("release") {
+    // Windows release only: the macOS app ships gs/pdfium as bundle resources (tauri.macos.conf.json).
+    if std::env::var("PROFILE").as_deref() == Ok("release") && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_runtime();
     }
     tauri_build::build()

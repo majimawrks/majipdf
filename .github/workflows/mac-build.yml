@@ -1,0 +1,138 @@
+# Universal (arm64 + x86_64) macOS 15+ build: Ghostscript from source, PDFium prebuilt, Tauri app + DMG, smoke test on both arches.
+name: mac-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [mac]
+
+env:
+  GS_VERSION: 10.08.0
+  GS_TAG: gs10080
+  PDFIUM_TAG: chromium/8066
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
+
+jobs:
+  gs:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: gs-${{ matrix.arch }}
+          key: gs-${{ env.GS_VERSION }}-${{ matrix.arch }}-macos15
+      - name: Build Ghostscript (bundled third-party libs only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o gs.tgz "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$GS_TAG/ghostscript-$GS_VERSION.tar.gz"
+          tar xzf gs.tgz
+          cd "ghostscript-$GS_VERSION"
+          # PKG_CONFIG=false keeps Homebrew libs out, so the binary only links system libraries
+          PKG_CONFIG=false ./configure --disable-cups --without-x --disable-gtk --disable-fontconfig \
+            --disable-dbus --without-tesseract --without-libidn --without-libpaper --without-pdftoraster \
+            --without-urf --without-ijs
+          make -j"$(sysctl -n hw.ncpu)"
+          cp bin/gs "$GITHUB_WORKSPACE/gs-${{ matrix.arch }}"
+      - name: Check binary
+        run: |
+          f="gs-${{ matrix.arch }}"
+          lipo -info "$f"
+          otool -L "$f"
+          # only system libraries allowed
+          if otool -L "$f" | tail -n +2 | grep -vE '^\s*(/usr/lib/|/System/)'; then echo "non-system dependency"; exit 1; fi
+          otool -l "$f" | grep -A4 LC_BUILD_VERSION
+          chmod +x "$f"
+          "./$f" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gs-${{ matrix.arch }}
+          path: gs-${{ matrix.arch }}
+
+  build:
+    needs: gs
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # scripts/version.mjs counts commits
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gs-*
+          merge-multiple: true
+      - name: Stage runtime (universal gs + PDFium, ad-hoc signed)
+        run: |
+          mkdir -p src-tauri/mac-runtime
+          lipo -create gs-arm64 gs-x86_64 -output src-tauri/mac-runtime/gs
+          chmod +x src-tauri/mac-runtime/gs
+          curl -fsSL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/pdfium-mac-univ.tgz"
+          mkdir pdfium && tar xzf pdfium.tgz -C pdfium
+          cp pdfium/lib/libpdfium.dylib src-tauri/mac-runtime/
+          codesign --force -s - src-tauri/mac-runtime/gs src-tauri/mac-runtime/libpdfium.dylib
+          lipo -info src-tauri/mac-runtime/gs src-tauri/mac-runtime/libpdfium.dylib
+          mkdir -p _tools/mac && cp src-tauri/mac-runtime/* _tools/mac/ # debug-profile tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: cargo test (native arm64, debug)
+        working-directory: src-tauri
+        run: cargo test
+      - name: Build universal app + dmg
+        env:
+          MAJIPDF_TARGET_DIR: ${{ runner.temp }}/target
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+      - name: Check result
+        run: |
+          B="$RUNNER_TEMP/target/universal-apple-darwin/release/bundle"
+          APP="$B/macos/majipdf.app"
+          lipo -info "$APP/Contents/MacOS/majipdf" "$APP"/Contents/Resources/runtime/*
+          codesign -dv "$APP" 2>&1 | head
+          otool -l "$APP/Contents/MacOS/majipdf" | grep -A4 LC_BUILD_VERSION
+          ls -l "$B"/dmg
+          mkdir out && cp "$B"/dmg/*.dmg out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: majipdf-mac-dmg
+          path: out/*.dmg
+
+  smoke:
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: majipdf-mac-dmg
+      - name: Install, launch, screenshot
+        run: |
+          uname -m
+          hdiutil attach ./*.dmg -mountpoint /tmp/dmg -nobrowse
+          cp -R /tmp/dmg/majipdf.app /Applications/
+          hdiutil detach /tmp/dmg
+          xattr -dr com.apple.quarantine /Applications/majipdf.app
+          /Applications/majipdf.app/Contents/Resources/runtime/gs --version
+          open /Applications/majipdf.app
+          sleep 15
+          screencapture -x "shot-${{ matrix.arch }}.png"
+          pgrep -x majipdf
+          pkill -x majipdf || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-screenshot-${{ matrix.arch }}
+          path: shot-*.png

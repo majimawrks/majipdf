@@ -129,7 +129,7 @@ pub(crate) fn gs_args(preset: &str, dpi: u32, gray: bool, pw: Option<&str>, inpu
 
 /// Runs gs to completion; calls `on_page(n)` for each "Page N" line.
 pub(crate) fn run_gs(args: &[String], mut on_page: impl FnMut(u32)) -> Result<(), GsErr> {
-    let exe = crate::runtime::path("gswin64c.exe").map_err(GsErr::Failed)?;
+    let exe = crate::runtime::path(crate::runtime::GS).map_err(GsErr::Failed)?;
     let mut cmd = Command::new(&exe);
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir); // gsdll64.dll resolves from the exe folder
@@ -223,21 +223,29 @@ fn sweepable(name: &str, age: std::time::Duration, live: &std::collections::Hash
     }
 }
 
+#[cfg(windows)]
 pub(crate) fn system_exe(rel: &str) -> PathBuf {
     PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into())).join(rel)
 }
 
 /// Pids of running processes; None if it cannot be determined (then nothing is swept).
 fn live_pids() -> Option<std::collections::HashSet<u32>> {
-    let mut cmd = Command::new(system_exe(r"System32\tasklist.exe"));
-    cmd.args(["/FO", "CSV", "/NH"]).stdin(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW
+    let (mut cmd, pid_of) = {
+        let mut c = Command::new(system_exe(r"System32\tasklist.exe"));
+        c.args(["/FO", "CSV", "/NH"]);
+        std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000); // CREATE_NO_WINDOW
+        (c, (|l: &str| l.split("\",\"").nth(1)?.trim_matches('"').parse().ok()) as fn(&str) -> Option<u32>)
+    };
+    #[cfg(not(windows))]
+    let (mut cmd, pid_of) = {
+        let mut c = Command::new("/bin/ps");
+        c.args(["-A", "-o", "pid="]);
+        (c, (|l: &str| l.trim().parse().ok()) as fn(&str) -> Option<u32>)
+    };
+    cmd.stdin(Stdio::null()).stderr(Stdio::null());
     let out = cmd.output().ok().filter(|o| o.status.success())?;
-    let mut set: std::collections::HashSet<u32> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.split("\",\"").nth(1)?.trim_matches('"').parse().ok())
-        .collect();
+    let mut set: std::collections::HashSet<u32> = String::from_utf8_lossy(&out.stdout).lines().filter_map(pid_of).collect();
     set.insert(std::process::id());
     (set.len() > 1).then_some(set)
 }
@@ -490,17 +498,20 @@ pub fn discard_result(temp: String) -> Result<(), String> {
     std::fs::remove_file(pending_result(&temp)?).map_err(|e| e.to_string())
 }
 
-fn explorer() -> Command {
-    Command::new(system_exe("explorer.exe"))
+/// Windows: explorer.exe; macOS: /usr/bin/open.
+// ponytail: system file opener instead of tauri-plugin-opener (no new dependency/capability); Linux unsupported.
+fn opener() -> Command {
+    #[cfg(windows)]
+    return Command::new(system_exe("explorer.exe"));
+    #[cfg(not(windows))]
+    Command::new("/usr/bin/open")
 }
-
-// ponytail: explorer.exe instead of tauri-plugin-opener (no new dependency/capability); Windows only, revisit for the macOS build.
 #[tauri::command]
 pub fn open_path(path: String) {
     let p = Path::new(&path);
     let ok_ext = p.extension().is_some_and(|e| ["pdf", "docx", "xlsx"].iter().any(|x| e.eq_ignore_ascii_case(x)));
     if ok_ext && p.is_file() {
-        let _ = explorer().arg(p).spawn();
+        let _ = opener().arg(p).spawn();
     }
 }
 
@@ -509,10 +520,12 @@ pub fn reveal_path(path: String) {
     if path.contains('"') {
         return;
     }
-    let mut cmd = explorer();
+    let mut cmd = opener();
     // explorer only parses /select,"<path>" as one raw arg; Rust auto-quoting breaks paths with spaces.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::raw_arg(&mut cmd, format!("/select,\"{path}\""));
+    #[cfg(not(windows))]
+    cmd.args(["-R", &path]);
     let _ = cmd.spawn();
 }
 

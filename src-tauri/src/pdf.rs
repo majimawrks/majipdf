@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 pub(crate) fn pdfium() -> Result<MutexGuard<'static, Pdfium>, String> {
     static P: OnceLock<Result<Mutex<Pdfium>, String>> = OnceLock::new();
     let r = P.get_or_init(|| {
-        let dll = crate::runtime::path("pdfium.dll")?;
+        let dll = crate::runtime::path(crate::runtime::PDFIUM)?;
         Pdfium::bind_to_library(&dll)
             .map(|b| Mutex::new(Pdfium::new(b)))
             .map_err(|e| format!("cannot load {}: {e}", dll.display()))

@@ -2,7 +2,9 @@
 //! `%LOCALAPPDATA%\majipdf\runtime\<version>-<hash8>\`, verified against an embedded SHA-256 manifest on
 //! every launch through handles that stay open (deny write/delete) while we run. Debug: `_tools/`.
 //! Design: `_docs/packaging-design.md`. Never downloads anything.
-#![cfg_attr(debug_assertions, allow(dead_code))]
+//! macOS: no embedding or extraction; `gs` and `libpdfium.dylib` sit in the bundle (`Contents/Resources/runtime/`),
+//! debug builds use `_tools/mac/`. The extraction code below is only used by the Windows release build.
+#![cfg_attr(any(debug_assertions, not(windows)), allow(dead_code))]
 
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -14,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// (file name, size, sha256 hex)
 type Manifest = [(&'static str, u64, &'static str)];
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(windows, not(debug_assertions)))]
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/runtime_manifest.rs"));
     pub static ZIP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runtime.zip"));
@@ -38,7 +40,17 @@ pub fn harden() {
     }
 }
 
-/// Absolute path of one payload file (`pdfium.dll`, `gswin64c.exe`, `gsdll64.dll`); the first call
+/// Payload file names callers ask for (Windows also ships `gsdll64.dll`, resolved next to `GS`).
+#[cfg(windows)]
+pub const PDFIUM: &str = "pdfium.dll";
+#[cfg(windows)]
+pub const GS: &str = "gswin64c.exe";
+#[cfg(not(windows))]
+pub const PDFIUM: &str = "libpdfium.dylib";
+#[cfg(not(windows))]
+pub const GS: &str = "gs";
+
+/// Absolute path of one payload file (`PDFIUM`, `GS`); on Windows release the first call
 /// extracts/verifies (blocking), later calls are free.
 pub fn path(name: &str) -> Result<PathBuf, String> {
     imp::path(name)
@@ -47,20 +59,39 @@ pub fn path(name: &str) -> Result<PathBuf, String> {
 /// Background warm-up so the first tool use doesn't wait for extraction.
 pub fn warm() {
     std::thread::spawn(|| {
-        let _ = path("pdfium.dll");
+        let _ = path(PDFIUM);
     });
 }
 
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, windows))]
 mod imp {
     use super::*;
     pub fn path(name: &str) -> Result<PathBuf, String> {
-        let sub = if name == "pdfium.dll" { "pdfium/bin" } else { "gs/bin" };
+        let sub = if name == PDFIUM { "pdfium/bin" } else { "gs/bin" };
         Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(sub).join(name))
     }
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(debug_assertions, not(windows)))]
+mod imp {
+    use super::*;
+    pub fn path(name: &str) -> Result<PathBuf, String> {
+        Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools/mac").join(name))
+    }
+}
+
+/// Bundle layout: `majipdf.app/Contents/MacOS/majipdf` next to `Contents/Resources/runtime/`.
+#[cfg(all(not(debug_assertions), not(windows)))]
+mod imp {
+    use super::*;
+    pub fn path(name: &str) -> Result<PathBuf, String> {
+        let exe = std::env::current_exe().map_err(|e| format!("runtime unavailable: {e}"))?;
+        let p = exe.parent().ok_or("runtime unavailable: no exe folder")?.join("../Resources/runtime").join(name);
+        if p.is_file() { Ok(p) } else { Err(format!("runtime unavailable: {} is missing", p.display())) }
+    }
+}
+
+#[cfg(all(not(debug_assertions), windows))]
 mod imp {
     use super::*;
     pub fn path(name: &str) -> Result<PathBuf, String> {
@@ -372,7 +403,7 @@ mod tests {
     fn runtime_release_end_to_end() {
         init(&std::env::var("MAJIPDF_TEST_VERSION").unwrap_or_else(|_| "0.6.0-test".into()));
         let t = Instant::now();
-        let gs = path("gswin64c.exe").unwrap();
+        let gs = path(GS).unwrap();
         eprintln!("ensure: {:?} -> {}", t.elapsed(), gs.display());
         // First original letter_* sample (no file names of local samples in tracked code).
         let input = std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_samples"))

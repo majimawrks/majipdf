@@ -1,6 +1,6 @@
 import en from "../i18n/en.json";
 import id from "../i18n/id.json";
-import { settings } from "./state.svelte";
+import { isMac, settings } from "./state.svelte";
 
 export type Lang = "en" | "id";
 type Dict = typeof en;
@@ -14,5 +14,6 @@ export function t(key: keyof Dict, params?: Record<string, string | number>): st
       s = s.replaceAll(`{${k}}`, String(v));
     }
   }
-  return s;
+  // macOS: path separator and modifier key (same strings serve both languages)
+  return isMac ? s.replaceAll("Documents\\majipdf", "Documents/majipdf").replaceAll("Ctrl", "⌘") : s;
 }

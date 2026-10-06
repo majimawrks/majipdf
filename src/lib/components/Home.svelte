@@ -24,7 +24,7 @@
     openTool(id, f ? [f] : []);
   }
 
-  const suggestions: ToolId[] = ["compress", "split", "organize", "word"];
+  const suggestions: ToolId[] = TOOL_ORDER.filter((id) => ["compress", "split", "organize", "word"].includes(id));
 </script>
 
 <div style="flex:1;min-height:0;overflow:auto">
