@@ -1,0 +1,114 @@
+# Spike: universal (arm64 + x86_64) Ghostscript and PDFium for the macOS build.
+name: mac-spike
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [mac]
+    paths: [.github/workflows/mac-spike.yml]
+
+env:
+  GS_VERSION: 10.08.0
+  GS_TAG: gs10080
+  PDFIUM_TAG: chromium/8066
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
+
+jobs:
+  gs:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Build Ghostscript (bundled third-party libs only)
+        run: |
+          curl -fsSL -o gs.tgz "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$GS_TAG/ghostscript-$GS_VERSION.tar.gz"
+          tar xzf gs.tgz
+          cd "ghostscript-$GS_VERSION"
+          # PKG_CONFIG=false keeps Homebrew libs out, so the binary only links system libraries
+          PKG_CONFIG=false ./configure --disable-cups --without-x --disable-gtk --disable-fontconfig \
+            --disable-dbus --without-tesseract --without-libidn --without-libpaper --without-pdftoraster \
+            --without-urf --without-ijs
+          make -j"$(sysctl -n hw.ncpu)"
+          cp bin/gs "$GITHUB_WORKSPACE/gs-${{ matrix.arch }}"
+      - name: Check binary
+        run: |
+          f="gs-${{ matrix.arch }}"
+          lipo -info "$f"
+          otool -L "$f"
+          # only system libraries allowed
+          if otool -L "$f" | tail -n +2 | grep -vE '^\s*(/usr/lib/|/System/)'; then echo "non-system dependency"; exit 1; fi
+          otool -l "$f" | grep -A4 LC_BUILD_VERSION
+          "./$f" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gs-${{ matrix.arch }}
+          path: gs-${{ matrix.arch }}
+
+  universal:
+    needs: gs
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gs-*
+          merge-multiple: true
+      - name: Lipo Ghostscript, fetch universal PDFium
+        run: |
+          mkdir runtime
+          lipo -create gs-arm64 gs-x86_64 -output runtime/gs
+          chmod +x runtime/gs
+          curl -fsSL -o pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_TAG/pdfium-mac-univ.tgz"
+          mkdir pdfium && tar xzf pdfium.tgz -C pdfium
+          cp pdfium/lib/libpdfium.dylib runtime/
+          lipo -info runtime/gs runtime/libpdfium.dylib
+          ls -la runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-runtime
+          path: runtime/
+
+  smoke:
+    needs: universal
+    strategy:
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-runtime
+          path: runtime
+      - name: Ghostscript runs from a random folder with the app's compress flags
+        run: |
+          chmod +x runtime/gs
+          uname -m
+          mkdir -p /tmp/elsewhere && cp runtime/gs /tmp/elsewhere/ && cd /tmp/elsewhere
+          # input: text + a 600x600 RGB image, so downsampling has work to do
+          ./gs -q -sDEVICE=pdfwrite -o in.pdf -c \
+            "/Helvetica findfont 24 scalefont setfont 72 720 moveto (majipdf smoke) show
+             gsave 72 100 translate 400 400 scale 600 600 8 [600 0 0 -600 0 600]
+             {600 string dup 0 1 599 {2 copy exch 256 mod put pop} for} false 3 colorimage grestore showpage"
+          ./gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dNOPAUSE -dBATCH -dPDFSETTINGS=/screen \
+            -dColorImageDownsampleType=/Bicubic -dColorImageResolution=72 -dDownsampleColorImages=true \
+            -dColorImageDownsampleThreshold=1.0 -dCompressPages=true -dDetectDuplicateImages=true \
+            -dSubsetFonts=true -dEmbedAllFonts=true -sOutputFile=out.pdf in.pdf
+          ls -l in.pdf out.pdf
+          test -s out.pdf
+      - name: PDFium loads and opens the PDF
+        run: |
+          python3 - <<'EOF'
+          import ctypes
+          p = ctypes.CDLL("runtime/libpdfium.dylib")
+          p.FPDF_InitLibrary()
+          p.FPDF_LoadDocument.restype = ctypes.c_void_p
+          d = p.FPDF_LoadDocument(b"/tmp/elsewhere/out.pdf", None)
+          assert d, "load failed"
+          n = p.FPDF_GetPageCount(ctypes.c_void_p(d))
+          print("pages:", n)
+          assert n == 1
+          EOF
