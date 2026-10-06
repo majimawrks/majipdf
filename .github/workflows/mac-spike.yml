@@ -91,8 +91,9 @@ jobs:
           # input: text + a 600x600 RGB image, so downsampling has work to do
           ./gs -q -sDEVICE=pdfwrite -o in.pdf -c \
             "/Helvetica findfont 24 scalefont setfont 72 720 moveto (majipdf smoke) show
+             /s 1800 string def 0 1 1799 {s exch dup 7 mul 256 mod put} for
              gsave 72 100 translate 400 400 scale 600 600 8 [600 0 0 -600 0 600]
-             {600 string dup 0 1 599 {2 copy exch 256 mod put pop} for} false 3 colorimage grestore showpage"
+             {s} false 3 colorimage grestore showpage"
           ./gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dNOPAUSE -dBATCH -dPDFSETTINGS=/screen \
             -dColorImageDownsampleType=/Bicubic -dColorImageResolution=72 -dDownsampleColorImages=true \
             -dColorImageDownsampleThreshold=1.0 -dCompressPages=true -dDetectDuplicateImages=true \
