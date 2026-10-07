@@ -1,8 +1,9 @@
 # majipdf
 
 A PDF toolkit for Windows that works entirely offline. It compresses, merges, splits and
-reorders PDFs, and converts them to Word and Excel. The whole thing is a single exe that
-you run without installing, and it doesn't need admin rights.
+reorders PDFs, makes scanned PDFs searchable, and converts them to Word and Excel. The
+whole thing is a single exe that you run without installing, and it doesn't need admin
+rights.
 
 I wrote it for my coworkers. Most of us had gotten used to uploading work documents to
 online PDF sites to shrink or convert them, which is a bad habit when the documents are
@@ -21,7 +22,8 @@ It runs on Windows 11 (64-bit). Windows 10 with the WebView2 runtime should work
 I haven't tested it. PDF to Word needs Microsoft Word installed; everything else works
 without Office.
 
-On first launch majipdf unpacks two helpers, PDFium and Ghostscript, to
+On first launch majipdf unpacks its helpers (PDFium, Ghostscript and the OCR language
+files) to
 `%LOCALAPPDATA%\majipdf\runtime\` and checks them against hashes built into the exe. It
 does this check on every launch and repairs the folder if anything was changed.
 
@@ -43,6 +45,9 @@ or block it. If your IT team blocks it, that's the reason.
   logos. Values are copied exactly as shown (`054` stays `054`), and you can switch
   numbers to real numbers if you need to calculate. If the result isn't right, there's
   a second method that uses Excel's own PDF import.
+- Scan to text (OCR): adds an invisible text layer to scanned pages, so you can search,
+  select and copy their text. Indonesian and English. Pages that already have text are
+  kept as they are. Recognition is weaker on text inside ruled table cells.
 
 A few things apply to every tool:
 
@@ -57,7 +62,7 @@ A few things apply to every tool:
 
 ## Not there yet
 
-- OCR. Scanned pages come out as images in Word and as empty sheets in Excel.
+- OCR inside PDF to Word and Excel. For scans, run Scan to text first, then convert.
 - Editing and signing (white-out, text boxes, stamps).
 - ZIP files as input for Compress. A folder works.
 - A macOS version.
@@ -74,6 +79,8 @@ aren't in the repo, so put them in `_tools/` first:
   [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (Windows x64)
 - `_tools/gs/bin/gswin64c.exe` and `gsdll64.dll` from
   [Ghostscript](https://www.ghostscript.com/releases/) 10.x (Windows 64-bit)
+- `_tools/tessdata/eng.traineddata` and `ind.traineddata` from
+  [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast)
 
 Then:
 

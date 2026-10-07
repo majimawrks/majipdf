@@ -6,7 +6,7 @@ of the release zip.
 
 ## Ghostscript 10.08.0
 
-- Used for: Compress (and "Compress the result" in Merge)
+- Used for: Compress (and "Compress the result" in Merge), Scan to text (OCR)
 - License: GNU Affero General Public License v3.0 (AGPL-3.0)
 - Copyright (C) Artifex Software, Inc.
 - How it's used: the unmodified `gswin64c.exe` and `gsdll64.dll` are embedded in
@@ -15,6 +15,24 @@ of the release zip.
 - Source code: https://github.com/ArtifexSoftware/ghostpdl (tag `ghostpdl-10.08.0`),
   also at https://www.ghostscript.com/releases/
 - License text: `licenses/ghostscript-AGPL-3.0.txt`
+
+## Tesseract OCR 5.3.4 and Leptonica 1.84.1 (inside Ghostscript)
+
+- Used for: Scan to text (OCR)
+- Built into the official Ghostscript 10.08.0 Windows binary (`gsdll64.dll`) by Artifex;
+  majipdf does not modify or link to them.
+- Tesseract: Apache License 2.0, https://github.com/tesseract-ocr/tesseract
+  (license text: `licenses/Apache-2.0.txt`)
+- Leptonica: Leptonica License (BSD-2-Clause style), Copyright Leptonica,
+  http://www.leptonica.org/ (license text: `licenses/leptonica-license.txt`)
+
+## Tesseract language data (tessdata_fast: eng, ind)
+
+- Used for: Scan to text (OCR), English and Indonesian
+- License: Apache License 2.0, https://github.com/tesseract-ocr/tessdata_fast
+- The unmodified `eng.traineddata` and `ind.traineddata` are embedded in `majipdf.exe`
+  and unpacked next to Ghostscript.
+- License text: `licenses/Apache-2.0.txt`
 
 ## PDFium (chromium build 8066)
 
