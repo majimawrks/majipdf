@@ -2,12 +2,12 @@
 // UI (via vite.config.ts `__APP_VERSION__`).
 //
 // Pre-1.0 scheme (decided 2026-09-30): 0.<features shipped>.<git commit count>
-//   FEATURES = user-facing tools shipped: Compress, Merge, Split, Organize, Word, Excel = 6.
+//   FEATURES = user-facing tools shipped: Compress, Merge, Split, Organize, Word, Excel, OCR = 7.
 //   Bump it when a feature ships (OCR, Edit & sign…). The commit count only ever grows.
 // From 1.0.0 on: plain semver MAJOR.MINOR.PATCH, set by hand.
 import { execSync } from "node:child_process";
 
-export const FEATURES = 6;
+export const FEATURES = 7;
 
 export function appVersion() {
   let commits = 0;

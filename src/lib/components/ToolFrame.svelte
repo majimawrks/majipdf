@@ -26,6 +26,7 @@
     organize: "_organized.pdf",
     word: ".docx",
     excel: ".xlsx",
+    ocr: "_ocr.pdf",
   };
 
   const saveName = $derived.by(() => {
@@ -51,6 +52,8 @@
         return t("orgRun", { n });
       case "word":
         return t("wordRun");
+      case "ocr":
+        return t("ocrRun");
       case "excel":
         return n === 1 ? t("excelRun1") : t("excelRun", { n });
     }

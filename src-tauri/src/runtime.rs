@@ -49,6 +49,22 @@ pub const GS: &str = "gswin64c.exe";
 pub const PDFIUM: &str = "libpdfium.dylib";
 #[cfg(not(windows))]
 pub const GS: &str = "gs";
+/// Tesseract language data for Ghostscript's `pdfocr24` device (same runtime folder as `GS`).
+pub const TESS_ENG: &str = "eng.traineddata";
+pub const TESS_IND: &str = "ind.traineddata";
+
+/// Folder holding `eng` + `ind` traineddata: `<user data dir>/majipdf/tessdata/` if it has both, else the bundled one.
+pub fn tessdata_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let user = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    #[cfg(not(windows))]
+    let user = std::env::var_os("HOME").map(|h| Path::new(&h).join("Library/Application Support"));
+    let over = user.map(|u| u.join("majipdf").join("tessdata"));
+    if let Some(d) = over.filter(|d| d.join(TESS_ENG).is_file() && d.join(TESS_IND).is_file()) {
+        return Some(d);
+    }
+    path(TESS_ENG).ok()?.parent().map(Path::to_path_buf)
+}
 
 /// Absolute path of one payload file (`PDFIUM`, `GS`); on Windows release the first call
 /// extracts/verifies (blocking), later calls are free.
@@ -67,7 +83,7 @@ pub fn warm() {
 mod imp {
     use super::*;
     pub fn path(name: &str) -> Result<PathBuf, String> {
-        let sub = if name == PDFIUM { "pdfium/bin" } else { "gs/bin" };
+        let sub = if name == PDFIUM { "pdfium/bin" } else if name.ends_with(".traineddata") { "tessdata" } else { "gs/bin" };
         Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(sub).join(name))
     }
 }
@@ -76,7 +92,8 @@ mod imp {
 mod imp {
     use super::*;
     pub fn path(name: &str) -> Result<PathBuf, String> {
-        Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools/mac").join(name))
+        let sub = if name.ends_with(".traineddata") { "tessdata" } else { "mac" };
+        Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(sub).join(name))
     }
 }
 

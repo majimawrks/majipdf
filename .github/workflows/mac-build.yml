@@ -10,6 +10,9 @@ env:
   GS_VERSION: 10.08.0
   GS_TAG: gs10080
   PDFIUM_TAG: chromium/8066
+  TESSDATA_COMMIT: 87416418657359cb625c412a48b6e1d6d41c29bd # github.com/tesseract-ocr/tessdata_fast
+  TESSDATA_ENG_SHA256: 7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2
+  TESSDATA_IND_SHA256: 69786901da87ab8766c1ea7fbb10b28f2110c14da3f6c8f2735df131fba95d88
   MACOSX_DEPLOYMENT_TARGET: "15.0"
 
 jobs:
@@ -27,7 +30,7 @@ jobs:
         id: cache
         with:
           path: gs-${{ matrix.arch }}
-          key: gs-${{ env.GS_VERSION }}-${{ matrix.arch }}-macos15
+          key: gs-${{ env.GS_VERSION }}-${{ matrix.arch }}-macos15-ocr
       - name: Build Ghostscript (bundled third-party libs only)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -36,7 +39,7 @@ jobs:
           cd "ghostscript-$GS_VERSION"
           # PKG_CONFIG=false keeps Homebrew libs out, so the binary only links system libraries
           PKG_CONFIG=false ./configure --disable-cups --without-x --disable-gtk --disable-fontconfig \
-            --disable-dbus --without-tesseract --without-libidn --without-libpaper --without-pdftoraster \
+            --disable-dbus --without-libidn --without-libpaper --without-pdftoraster \
             --without-urf --without-ijs
           make -j"$(sysctl -n hw.ncpu)"
           cp bin/gs "$GITHUB_WORKSPACE/gs-${{ matrix.arch }}"
@@ -76,7 +79,15 @@ jobs:
           cp pdfium/lib/libpdfium.dylib src-tauri/mac-runtime/
           codesign --force -s - src-tauri/mac-runtime/gs src-tauri/mac-runtime/libpdfium.dylib
           lipo -info src-tauri/mac-runtime/gs src-tauri/mac-runtime/libpdfium.dylib
-          mkdir -p _tools/mac && cp src-tauri/mac-runtime/* _tools/mac/ # debug-profile tests
+          # Tesseract language data (tessdata_fast, pinned commit + sha256) for the pdfocr24 device
+          for l in eng ind; do
+            curl -fsSL -o "src-tauri/mac-runtime/$l.traineddata" "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$TESSDATA_COMMIT/$l.traineddata"
+          done
+          echo "$TESSDATA_ENG_SHA256  src-tauri/mac-runtime/eng.traineddata" | shasum -a 256 -c -
+          echo "$TESSDATA_IND_SHA256  src-tauri/mac-runtime/ind.traineddata" | shasum -a 256 -c -
+          mkdir -p _tools/mac _tools/tessdata
+          cp src-tauri/mac-runtime/gs src-tauri/mac-runtime/libpdfium.dylib _tools/mac/ # debug-profile tests
+          cp src-tauri/mac-runtime/*.traineddata _tools/tessdata/
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -94,7 +105,8 @@ jobs:
         run: |
           B="$RUNNER_TEMP/target/universal-apple-darwin/release/bundle"
           APP="$B/macos/majipdf.app"
-          lipo -info "$APP/Contents/MacOS/majipdf" "$APP"/Contents/Resources/runtime/*
+          lipo -info "$APP/Contents/MacOS/majipdf" "$APP/Contents/Resources/runtime/gs" "$APP/Contents/Resources/runtime/libpdfium.dylib"
+          ls -l "$APP"/Contents/Resources/runtime
           codesign -dv "$APP" 2>&1 | head
           otool -l "$APP/Contents/MacOS/majipdf" | grep -A4 LC_BUILD_VERSION
           ls -l "$B"/dmg
@@ -126,6 +138,14 @@ jobs:
           hdiutil detach /tmp/dmg
           xattr -dr com.apple.quarantine /Applications/majipdf.app
           /Applications/majipdf.app/Contents/Resources/runtime/gs --version
+          # OCR smoke: render a text page to a bitmap, recognize it, read the word back with txtwrite
+          R=/Applications/majipdf.app/Contents/Resources/runtime
+          printf '%%!PS
+/Helvetica findfont 48 scalefont setfont 72 700 moveto (Tesseract smoke test) show showpage
+' > ocr.ps
+          TESSDATA_PREFIX="$R/" "$R/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfocr24 -r300 -sOCRLanguage=ind+eng -o ocr.pdf ocr.ps
+          "$R/gs" -q -dNOPAUSE -dBATCH -sDEVICE=txtwrite -o - ocr.pdf | tee ocr.txt
+          grep -qi tesseract ocr.txt
           open /Applications/majipdf.app
           sleep 15
           screencapture -x "shot-${{ matrix.arch }}.png"

@@ -160,8 +160,8 @@
   "excelRun1": "Export 1 table",
   "noTables": "No tables found.",
   "scannedTitle": "This looks like a scanned document",
-  "scannedWord": "The pages are pictures of text, so the Word file will mostly contain images you can't edit. Text recognition (OCR) is coming in a later version.",
-  "scannedExcel": "Pages without a text layer will come out empty until text recognition (OCR) is available.",
+  "scannedWord": "The pages are pictures of text, so the Word file will mostly contain images you can't edit. Run Scan to text (OCR) first, then convert the result.",
+  "scannedExcel": "Pages without a text layer will come out empty. Run Scan to text (OCR) first, then convert the result.",
   "convertAnyway": "Convert anyway",
   "officeWordTitle": "Microsoft Word isn't installed on this computer",
   "officeExcelTitle": "Microsoft Excel isn't installed on this computer",
@@ -278,5 +278,16 @@
   "about": "About majipdf",
   "aboutVersion": "Version {v}",
   "aboutBuiltBy": "Built by Majima",
-  "aboutAi": "with AI assistance"
+  "aboutAi": "with AI assistance",
+  "ocrRun": "Recognize text",
+  "ocrNote": "Scanned pages get an invisible text layer, so you can search, select and copy their text. Pages that already have text are kept as they are. Languages: Indonesian and English.",
+  "ocrReading": "Reading page {n} of {total}",
+  "ocrPrep": "Preparing…",
+  "ocrSave": "Saving…",
+  "ocrDone": "Text recognized on {n} of {total} pages · {s} · {sec} s",
+  "doneSubOcr": "Your searchable PDF is ready.",
+  "ocrNoScan": "This PDF already has text on every page, so there is nothing to recognize.",
+  "ocrErrTitle": "Couldn't recognize the text",
+  "ocrErrBody": "Something went wrong while reading {f}. Your original file is unchanged.",
+  "emptyOcr": "Drop the scanned PDF you want to make searchable"
 }

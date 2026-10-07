@@ -6,6 +6,7 @@ import { replaceFile } from "./split";
 import { replaceFile as replaceOrganizeFile } from "./organize";
 import { replaceFile as replaceWordFile } from "./word";
 import { replaceFile as replaceExcelFile } from "./excel";
+import { replaceFile as replaceOcrFile } from "./ocr";
 
 export async function addFilesToHome(paths: string[]) {
   if (isRunning()) return;
@@ -29,7 +30,7 @@ export async function addFilesToTool(paths: string[]) {
     return;
   }
   app.notice = "";
-  if (app.route === "split" || app.route === "organize" || app.route === "word" || app.route === "excel") {
+  if (app.route === "split" || app.route === "organize" || app.route === "word" || app.route === "excel" || app.route === "ocr") {
     // A fresh FileInfo for an encrypted file has no page count; a password remembered from an
     // earlier load would make the tool treat it as unlocked and never load it. Ask again.
     delete app.compress.passwords[pdfs[0].path];
@@ -38,6 +39,7 @@ export async function addFilesToTool(paths: string[]) {
   if (app.route === "organize") return replaceOrganizeFile(pdfs[0]);
   if (app.route === "word") return replaceWordFile(pdfs[0]);
   if (app.route === "excel") return replaceExcelFile(pdfs[0]);
+  if (app.route === "ocr") return replaceOcrFile(pdfs[0]);
   const have = new Set(app.tool.files.map((f) => f.path));
   app.tool.files = [...app.tool.files, ...pdfs.filter((f) => !have.has(f.path))];
   app.tool.phase = "loaded";

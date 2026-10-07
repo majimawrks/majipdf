@@ -5,7 +5,7 @@ export const isMac = /Mac/.test(navigator.userAgent);
 export type Lang = "en" | "id";
 export type Theme = "auto" | "light" | "dark";
 export type OutMode = "next" | "folder";
-export type ToolId = "compress" | "merge" | "split" | "organize" | "word" | "excel";
+export type ToolId = "compress" | "merge" | "split" | "organize" | "word" | "excel" | "ocr";
 
 export interface FileInfo {
   path: string;
@@ -117,6 +117,25 @@ export interface ExcelResult {
   seconds: number;
   pages: number;
   empty_pages: number;
+}
+
+// OCR contract types (see _docs/ocr-contract.md)
+export interface OcrRequest {
+  path: string;
+  password: string | null;
+  out_mode: OutMode;
+}
+export interface OcrProgress {
+  stage: "preparing" | "reading" | "saving";
+  done: number;
+  total: number;
+}
+export interface OcrResult {
+  output: string;
+  size: number;
+  seconds: number;
+  ocr_pages: number;
+  pages: number;
 }
 
 // Organize contract types (see _docs/organize-contract.md)
@@ -261,6 +280,15 @@ export const app = $state({
       startedAt: 0,
       progress: null as WordProgress | null,
       result: null as WordResult | null,
+      error: "",
+    },
+  },
+  ocr: {
+    run: {
+      name: "",
+      progress: null as OcrProgress | null,
+      result: null as OcrResult | null,
+      noScan: false, // backend said every page already has text: info note on the loaded view
       error: "",
     },
   },

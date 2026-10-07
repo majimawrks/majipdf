@@ -1,6 +1,6 @@
 // Thin wrapper so the UI still renders in a plain browser (`npm run dev`, no Tauri runtime).
 // In the browser, file_info / dialogs / compress are simulated so the whole flow can be clicked through.
-import type { CompressProgress, CompressRequest, CompressResult, FileInfo, MergeProgress, MergeRequest, MergeResult, OrganizeProgress, OrganizeRequest, OrganizeResult, OutMode, ExcelProgress, ExcelRequest, ExcelResult, SplitProgress, SplitRequest, SplitResult, WordProgress, WordRequest, WordResult } from "./state.svelte";
+import type { CompressProgress, CompressRequest, CompressResult, FileInfo, MergeProgress, MergeRequest, MergeResult, OrganizeProgress, OrganizeRequest, OrganizeResult, OutMode, ExcelProgress, ExcelRequest, ExcelResult, SplitProgress, SplitRequest, SplitResult, WordProgress, WordRequest, WordResult, OcrProgress, OcrRequest, OcrResult } from "./state.svelte";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -340,6 +340,52 @@ async function mockWord(req: WordRequest): Promise<WordResult> {
   const dir = req.path.replace(/[\\/][^\\/]*$/, "");
   const stem = req.path.split(/[\\/]/).pop()!.replace(/\.pdf$/i, "");
   return { output: `${dir}/${stem}.docx`, size: 210 * 1024, seconds: Math.round((Date.now() - t0) / 1000) };
+}
+
+// ---- ocr ------------------------------------------------------------------
+const ocrListeners = new Set<(p: OcrProgress) => void>();
+let mockOcrCancel = false;
+
+export async function onOcrProgress(cb: (p: OcrProgress) => void): Promise<() => void> {
+  if (!inTauri) {
+    ocrListeners.add(cb);
+    return () => ocrListeners.delete(cb);
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<OcrProgress>("ocr-progress", (e) => cb(e.payload));
+}
+
+export async function ocrRun(req: OcrRequest): Promise<OcrResult> {
+  if (!inTauri) return mockOcr(req);
+  return invoke<OcrResult>("ocr_run", { req });
+}
+
+export async function ocrCancel(): Promise<void> {
+  if (!inTauri) {
+    mockOcrCancel = true;
+    return;
+  }
+  return invoke("ocr_cancel");
+}
+
+async function mockOcr(req: OcrRequest): Promise<OcrResult> {
+  mockOcrCancel = false;
+  const t0 = Date.now();
+  const total = 6;
+  ocrListeners.forEach((l) => l({ stage: "preparing", done: 0, total }));
+  await sleep(600);
+  for (let i = 0; i <= total; i++) {
+    ocrListeners.forEach((l) => l({ stage: "reading", done: i, total }));
+    await sleep(500);
+    if (mockOcrCancel) throw "cancelled";
+  }
+  ocrListeners.forEach((l) => l({ stage: "saving", done: total, total }));
+  await sleep(600);
+  if (req.path.includes("Hadir")) throw "no_scan_pages"; // mock: force the "nothing to recognize" note
+  if (req.path.includes("Arsip")) throw "gs failed"; // mock: generic failure
+  const dir = req.path.replace(/[\/][^\/]*$/, "");
+  const stem = req.path.split(/[\/]/).pop()!.replace(/.pdf$/i, "");
+  return { output: `${dir}/${stem}_ocr.pdf`, size: 580 * 1024, seconds: Math.round((Date.now() - t0) / 1000), ocr_pages: total, pages: total + 2 };
 }
 
 // ---- excel ----------------------------------------------------------------

@@ -134,6 +134,9 @@ pub(crate) fn run_gs(args: &[String], mut on_page: impl FnMut(u32)) -> Result<()
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir); // gsdll64.dll resolves from the exe folder
     }
+    if let Some(t) = crate::runtime::tessdata_dir() {
+        cmd.env("TESSDATA_PREFIX", t.join("")); // trailing separator; only the pdfocr device reads it
+    }
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW

@@ -136,31 +136,29 @@ pub(crate) fn scanned_from(coverage_pct: &[f64]) -> bool {
     2 * n > coverage_pct.len()
 }
 
+/// Percentage (0-100) of the page area covered by image objects.
+pub(crate) fn image_coverage(page: &PdfPage) -> f64 {
+    let (w, h) = (page.width().value as f64, page.height().value as f64);
+    let area: f64 = page
+        .objects()
+        .iter()
+        .filter(|o| o.object_type() == PdfPageObjectType::Image)
+        .filter_map(|o| o.bounds().ok())
+        .map(|b| {
+            let r = b.to_rect();
+            let dx = (r.right().value as f64).min(w) - (r.left().value as f64).max(0.0);
+            let dy = (r.top().value as f64).min(h) - (r.bottom().value as f64).max(0.0);
+            dx.max(0.0) * dy.max(0.0)
+        })
+        .sum();
+    (area / (w * h).max(1.0) * 100.0).min(100.0)
+}
+
 /// false when the file cannot be opened (encrypted without/with wrong password, damaged).
 pub fn is_scanned(path: &Path, password: Option<&str>) -> bool {
     let Ok(p) = pdfium() else { return false };
     let Ok(doc) = p.load_pdf_from_file(path, password) else { return false };
-    let cov: Vec<f64> = doc
-        .pages()
-        .iter()
-        .take(3)
-        .map(|page| {
-            let (w, h) = (page.width().value as f64, page.height().value as f64);
-            let area: f64 = page
-                .objects()
-                .iter()
-                .filter(|o| o.object_type() == PdfPageObjectType::Image)
-                .filter_map(|o| o.bounds().ok())
-                .map(|b| {
-                    let r = b.to_rect();
-                    let dx = (r.right().value as f64).min(w) - (r.left().value as f64).max(0.0);
-                    let dy = (r.top().value as f64).min(h) - (r.bottom().value as f64).max(0.0);
-                    dx.max(0.0) * dy.max(0.0)
-                })
-                .sum();
-            (area / (w * h).max(1.0) * 100.0).min(100.0)
-        })
-        .collect();
+    let cov: Vec<f64> = doc.pages().iter().take(3).map(|page| image_coverage(&page)).collect();
     scanned_from(&cov)
 }
 

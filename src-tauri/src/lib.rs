@@ -4,6 +4,7 @@ use std::path::Path;
 mod compress;
 mod job;
 mod merge;
+mod ocr;
 mod organize;
 mod pdf;
 mod runtime;
@@ -128,7 +129,9 @@ pub fn run() {
             word::word_convert,
             word::word_cancel,
             excel::excel_convert,
-            excel::excel_cancel
+            excel::excel_cancel,
+            ocr::ocr_run,
+            ocr::ocr_cancel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

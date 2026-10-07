@@ -160,8 +160,8 @@
   "excelRun1": "Ekspor 1 tabel",
   "noTables": "Tidak ada tabel yang ditemukan.",
   "scannedTitle": "Ini tampaknya dokumen hasil pindaian",
-  "scannedWord": "Halamannya berupa gambar teks, jadi file Word sebagian besar berisi gambar yang tidak bisa disunting. Pengenalan teks (OCR) akan hadir di versi berikutnya.",
-  "scannedExcel": "Halaman tanpa lapisan teks akan kosong sampai pengenalan teks (OCR) tersedia.",
+  "scannedWord": "Halamannya berupa gambar teks, jadi file Word sebagian besar berisi gambar yang tidak bisa disunting. Jalankan Pindai ke teks (OCR) terlebih dahulu, lalu konversi hasilnya.",
+  "scannedExcel": "Halaman tanpa lapisan teks akan kosong. Jalankan Pindai ke teks (OCR) terlebih dahulu, lalu konversi hasilnya.",
   "convertAnyway": "Tetap ubah",
   "officeWordTitle": "Microsoft Word belum terpasang di komputer ini",
   "officeExcelTitle": "Microsoft Excel belum terpasang di komputer ini",
@@ -278,5 +278,16 @@
   "about": "Tentang majipdf",
   "aboutVersion": "Versi {v}",
   "aboutBuiltBy": "Dibuat oleh Majima",
-  "aboutAi": "dengan bantuan AI"
+  "aboutAi": "dengan bantuan AI",
+  "ocrRun": "Kenali teks",
+  "ocrNote": "Halaman hasil pindaian diberi lapisan teks tak terlihat, sehingga teksnya bisa dicari, dipilih, dan disalin. Halaman yang sudah berisi teks tidak diubah. Bahasa: Indonesia dan Inggris.",
+  "ocrReading": "Membaca halaman {n} dari {total}",
+  "ocrPrep": "Menyiapkan…",
+  "ocrSave": "Menyimpan…",
+  "ocrDone": "Teks dikenali pada {n} dari {total} halaman · {s} · {sec} dtk",
+  "doneSubOcr": "PDF yang bisa dicari sudah siap.",
+  "ocrNoScan": "Setiap halaman PDF ini sudah berisi teks, jadi tidak ada yang perlu dikenali.",
+  "ocrErrTitle": "Teks tidak dapat dikenali",
+  "ocrErrBody": "Terjadi kesalahan saat membaca {f}. File asli Anda tidak berubah.",
+  "emptyOcr": "Letakkan PDF hasil pindaian yang ingin dibuat bisa dicari"
 }

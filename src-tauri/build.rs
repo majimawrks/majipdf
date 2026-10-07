@@ -13,10 +13,12 @@ fn embed_runtime() {
     use std::io::Write;
 
     // Fixed order: the manifest lines (and so the folder hash) are reproducible.
-    const FILES: [(&str, &str); 3] = [
+    const FILES: [(&str, &str); 5] = [
         ("pdfium.dll", "../_tools/pdfium/bin/pdfium.dll"),
         ("gswin64c.exe", "../_tools/gs/bin/gswin64c.exe"),
         ("gsdll64.dll", "../_tools/gs/bin/gsdll64.dll"),
+        ("eng.traineddata", "../_tools/tessdata/eng.traineddata"),
+        ("ind.traineddata", "../_tools/tessdata/ind.traineddata"),
     ];
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let opts = zip::write::SimpleFileOptions::default()
@@ -40,7 +42,7 @@ fn embed_runtime() {
     let hash8 = &hex(&Sha256::digest(lines.as_bytes()))[..8];
     std::fs::write(
         out.join("runtime_manifest.rs"),
-        format!("pub const RUNTIME_HASH8: &str = \"{hash8}\";\npub const MANIFEST: [(&str, u64, &str); 3] = [\n{entries}];\n"),
+        format!("pub const RUNTIME_HASH8: &str = \"{hash8}\";\npub const MANIFEST: [(&str, u64, &str); {}] = [\n{entries}];\n", FILES.len()),
     )
     .unwrap();
 }

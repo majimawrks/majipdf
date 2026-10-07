@@ -15,6 +15,7 @@
   import SplitTool from "./lib/components/SplitTool.svelte";
   import OrganizeTool from "./lib/components/OrganizeTool.svelte";
   import WordTool from "./lib/components/WordTool.svelte";
+  import OcrTool from "./lib/components/OcrTool.svelte";
   import ExcelTool from "./lib/components/ExcelTool.svelte";
   import ToolFrame from "./lib/components/ToolFrame.svelte";
   import OfficeMissing from "./lib/components/OfficeMissing.svelte";
@@ -90,6 +91,8 @@
       <WordTool />
     {:else if app.route === "excel" && app.tool.phase !== "empty"}
       <ExcelTool />
+    {:else if app.route === "ocr" && app.tool.phase !== "empty"}
+      <OcrTool />
     {:else if app.tool.phase === "loaded"}
       <ToolFrame />
     {:else}
