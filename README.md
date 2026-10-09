@@ -1,7 +1,8 @@
 # majipdf
 
 A PDF toolkit for Windows that works entirely offline. It compresses, merges, splits and
-reorders PDFs, makes scanned PDFs searchable, and converts them to Word and Excel. The
+reorders PDFs, edits their text, makes scanned PDFs searchable, and converts them to
+Word and Excel. The
 whole thing is a single exe that you run without installing, and it doesn't need admin
 rights.
 
@@ -48,6 +49,11 @@ or block it. If your IT team blocks it, that's the reason.
 - Scan to text (OCR): adds an invisible text layer to scanned pages, so you can search,
   select and copy their text. Indonesian and English. Pages that already have text are
   kept as they are. Recognition is weaker on text inside ruled table cells.
+- Edit PDF: click a paragraph or line and change its text. It rewraps in place in the
+  PDF's own font, and the text below moves to make room. If the font is missing a letter
+  you typed, you can switch that paragraph to a similar font from your computer. Works
+  best on PDFs made from Word; text in scans, repeated footers and unusual fonts stays
+  locked. Undo and redo, and the result is saved as `<name>_edited.pdf`.
 
 A few things apply to every tool:
 
@@ -63,7 +69,7 @@ A few things apply to every tool:
 ## Not there yet
 
 - OCR inside PDF to Word and Excel. For scans, run Scan to text first, then convert.
-- Editing and signing (white-out, text boxes, stamps).
+- White-out, text boxes, signatures and stamps, and font/size/colour changes in Edit PDF.
 - ZIP files as input for Compress. A folder works.
 - A macOS version.
 
@@ -101,7 +107,7 @@ The version is computed at build time as `0.<features>.<commit count>`; see
 
 Tauri 2 with a Svelte 5 frontend. The backend is Rust: PDFium through pdfium-render for
 reading and page operations, Ghostscript for compression, rust_xlsxwriter for the Excel
-converter, and small embedded PowerShell scripts that drive Word and Excel over COM.
+converter, lopdf for editing text inside the page, and small embedded PowerShell scripts that drive Word and Excel over COM.
 
 I built majipdf with a lot of help from AI coding tools (Claude and Codex). I reviewed
 and tested every feature on real documents, but please report anything that looks off.
