@@ -13,7 +13,8 @@
     onanother,
     extra,
     after,
-  }: { subtitle: string; output: string; meta: string; icon?: string; onanother: () => void; extra?: Snippet; after?: Snippet } = $props();
+    anotherLabel,
+  }: { anotherLabel?: string; subtitle: string; output: string; meta: string; icon?: string; onanother: () => void; extra?: Snippet; after?: Snippet } = $props();
 
   const name = $derived(output.split(/[\\/]/).pop() ?? output);
   const dir = $derived(output.replace(/[\\/][^\\/]*$/, "").split(/[\\/]/).join(" › "));
@@ -58,7 +59,7 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button onclick={() => openPath(output)} style={primary}><i class="ph ph-{icon}" style="font-size:19px"></i>{t("openFile")}</button>
       <button onclick={() => revealPath(output)} style={secondary}><i class="ph ph-folder-open" style="font-size:19px"></i>{t("showFolder")}</button>
-      <button onclick={onanother} style={quiet}><i class="ph ph-arrow-counter-clockwise" style="font-size:19px"></i>{t("another")}</button>
+      <button onclick={onanother} style={quiet}><i class="ph ph-arrow-counter-clockwise" style="font-size:19px"></i>{anotherLabel ?? t("another")}</button>
     </div>
     {@render after?.()}
   </div>

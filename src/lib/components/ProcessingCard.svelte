@@ -5,7 +5,8 @@
   import { fmtElapsed } from "../format";
 
   // Generic single-output processing card (Merge now; Split/Organize/Word/Excel later).
-  let { name, percent, status, oncancel, extra }: { name: string; percent: number; status: string; oncancel: () => void; extra?: string } = $props();
+  // percent null = indeterminate (no % text, pulsing bar); oncancel omitted = nothing to cancel (button hidden).
+  let { name, percent, status, oncancel, extra }: { name: string; percent: number | null; status: string; oncancel?: () => void; extra?: string } = $props();
   let elapsed = $state(0);
 
   // Ticks every second so the screen never looks frozen.
@@ -25,7 +26,7 @@
     <div style="display:flex;align-items:center;gap:12px">
       <span class="spin"></span>
       <div style="flex:1;font-size:22px;font-weight:700">{t("processing")}</div>
-      <div style="font-size:22px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums">{percent}%</div>
+      {#if percent !== null}<div style="font-size:22px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums">{percent}%</div>{/if}
     </div>
     <div style="display:flex;flex-direction:column;gap:6px">
       <div style="display:flex;justify-content:space-between;gap:12px">
@@ -33,7 +34,7 @@
         <span style="font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text2)">{status}</span>
       </div>
       <div style="height:8px;border-radius:4px;background:var(--surface2);overflow:hidden">
-        <div style="height:100%;width:{percent}%;background:var(--accent);transition:width .3s linear"></div>
+        <div class:pulse={percent === null} style="height:100%;width:{percent ?? 100}%;background:var(--accent);transition:width .3s linear"></div>
       </div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
@@ -41,11 +42,11 @@
         {t("procNote")}{extra ? " " + extra : ""}
         <span style="font-variant-numeric:tabular-nums;color:var(--text3)"> · {t("elapsed", { t: fmtElapsed(elapsed) })}</span>
       </div>
-      <button
+      {#if oncancel}<button
         onclick={oncancel}
         disabled={app.tool.cancelling}
         style="min-height:44px;padding:0 22px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:16px;cursor:{app.tool.cancelling ? 'default' : 'pointer'}">{app.tool.cancelling ? t("cancelling") : t("cancel")}</button
-      >
+      >{/if}
     </div>
   </div>
 </div>
@@ -59,6 +60,14 @@
     border-top-color: var(--accent);
     animation: spin 0.8s linear infinite;
     flex-shrink: 0;
+  }
+  .pulse {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
   }
   @keyframes spin {
     to {

@@ -56,7 +56,7 @@ of the release zip.
 
 ## Rust and JavaScript libraries
 
-majipdf is built on Tauri, Svelte, pdfium-render, rust_xlsxwriter, image, zip, sha2 and
+majipdf is built on Tauri, Svelte, pdfium-render, rust_xlsxwriter, lopdf, ttf-parser, image, zip, sha2 and
 their dependencies. These are MIT, Apache-2.0, BSD or similarly permissive licensed. The
 full dependency lists are in `src-tauri/Cargo.lock` and `package-lock.json`.
 

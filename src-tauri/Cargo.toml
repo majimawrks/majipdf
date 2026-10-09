@@ -22,6 +22,8 @@ pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rust_xlsxwriter = "0.99.1"
 base64 = "0.22"
+lopdf = { version = "0.36", default-features = false }
+ttf-parser = "0.25"
 sha2 = "0.10"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 

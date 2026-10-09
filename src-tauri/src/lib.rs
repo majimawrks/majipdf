@@ -9,6 +9,7 @@ mod organize;
 mod pdf;
 mod runtime;
 mod split;
+mod edit;
 mod excel;
 mod word;
 
@@ -131,7 +132,16 @@ pub fn run() {
             excel::excel_convert,
             excel::excel_cancel,
             ocr::ocr_run,
-            ocr::ocr_cancel
+            ocr::ocr_cancel,
+            edit::edit_open,
+            edit::edit_page,
+            edit::edit_render,
+            edit::edit_apply,
+            edit::edit_undo,
+            edit::edit_redo,
+            edit::edit_history,
+            edit::edit_save,
+            edit::edit_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

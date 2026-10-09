@@ -1,11 +1,12 @@
 import { clearThumbCache } from "./thumbcache";
+import type { EditDoc, EditHistory, EditSaveRes, PageModel } from "./edit";
 
 export const isMac = /Mac/.test(navigator.userAgent);
 
 export type Lang = "en" | "id";
 export type Theme = "auto" | "light" | "dark";
 export type OutMode = "next" | "folder";
-export type ToolId = "compress" | "merge" | "split" | "organize" | "word" | "excel" | "ocr";
+export type ToolId = "compress" | "merge" | "split" | "organize" | "word" | "excel" | "ocr" | "edit";
 
 export interface FileInfo {
   path: string;
@@ -136,6 +137,16 @@ export interface OcrResult {
   seconds: number;
   ocr_pages: number;
   pages: number;
+}
+
+// Edit PDF: the open in-place editor (contract types live in edit.ts)
+export interface Editing {
+  page: number;
+  id: number;
+  text: string;
+  usePc: boolean;
+  applying: boolean;
+  bar: null | { kind: "missing"; chars: string } | { kind: "unsupported"; chars: string } | { kind: "overflow"; n: number } | { kind: "cannot_push" } | { kind: "error"; text: string };
 }
 
 // Organize contract types (see _docs/organize-contract.md)
@@ -292,6 +303,22 @@ export const app = $state({
       error: "",
     },
   },
+  edit: {
+    stage: "idle" as "idle" | "opening" | "ready" | "error" | "closing", // idle = waiting for edit.ts openFor
+    open: false, // backend session exists (job guard held) until edit_close
+    path: "",
+    doc: null as EditDoc | null,
+    models: {} as Record<number, PageModel>,
+    allGen: 0, // bumped by undo/redo: every page reloads
+    pgen: {} as Record<number, number>, // bumped by an apply: that page reloads
+    hist: { can_undo: false, can_redo: false, count: 0, changed_pages: [] } as EditHistory,
+    dirty: false, // unsaved changes since open / last save
+    editing: null as Editing | null,
+    leaveAsk: false,
+    busy: false, // an undo/redo/apply call is in flight
+    error: "",
+    run: { name: "", result: null as EditSaveRes | null, error: "" },
+  },
   excel: {
     sheetMode: "per_page" as "per_page" | "one",
     numbers: false,
@@ -334,8 +361,16 @@ export async function requestCancel(cancel: () => Promise<void>) {
   }
 }
 
+// Edit PDF holds a session (and the backend job guard): leaving asks first and closes it. The hook returns true when it took over `go`.
+let leaveHook: ((go: () => void) => boolean) | null = null;
+export const setLeaveHook = (h: (go: () => void) => boolean) => (leaveHook = h);
+
 export function goHome() {
-  if (isRunning()) return;
+  if (isRunning() || leaveHook?.(goHomeNow)) return;
+  goHomeNow();
+}
+
+function goHomeNow() {
   clearThumbCache();
   app.route = "home";
   app.settingsOpen = false;
@@ -343,7 +378,11 @@ export function goHome() {
 }
 
 export function openTool(id: ToolId, files: FileInfo[] = []) {
-  if (isRunning()) return;
+  if (isRunning() || leaveHook?.(() => openToolNow(id, files))) return;
+  openToolNow(id, files);
+}
+
+function openToolNow(id: ToolId, files: FileInfo[]) {
   clearThumbCache();
   app.route = id;
   app.tool = { phase: files.length ? "loaded" : "empty", cancelling: false, files };

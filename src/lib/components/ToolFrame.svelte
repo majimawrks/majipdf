@@ -15,7 +15,9 @@
     note = "",
     saveAs,
     runLabel: runLabelProp,
-  }: { runLabel?: string; saveAs?: string; main?: Snippet; options?: Snippet; files?: { name: string }[]; canRun?: boolean; onrun?: () => void; note?: string } = $props();
+    flush = false,
+    title,
+  }: { flush?: boolean; title?: string; runLabel?: string; saveAs?: string; main?: Snippet; options?: Snippet; files?: { name: string }[]; canRun?: boolean; onrun?: () => void; note?: string } = $props();
 
   const id = $derived(app.route as ToolId);
 
@@ -27,6 +29,7 @@
     word: ".docx",
     excel: ".xlsx",
     ocr: "_ocr.pdf",
+    edit: "_edited.pdf",
   };
 
   const saveName = $derived.by(() => {
@@ -54,6 +57,8 @@
         return t("wordRun");
       case "ocr":
         return t("ocrRun");
+      case "edit":
+        return t("editSave");
       case "excel":
         return n === 1 ? t("excelRun1") : t("excelRun", { n });
     }
@@ -61,7 +66,7 @@
 </script>
 
 <div style="flex:1;min-height:0;display:flex">
-  <section style="flex:1;min-width:0;overflow:auto;padding:22px 26px 28px;display:flex;flex-direction:column;gap:16px">
+  <section style="flex:1;min-width:0;display:flex;flex-direction:column;{flush ? 'overflow:hidden' : 'overflow:auto;padding:22px 26px 28px;gap:16px'}">
     {#if main}{@render main()}{:else}
     <ol style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px">
       {#each app.tool.files as f (f.path)}
@@ -84,7 +89,7 @@
     style="width:336px;flex-shrink:0;border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:0"
   >
     <div style="padding:18px 22px 6px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">
-      {t("options")}
+      {title ?? t("options")}
     </div>
     <div style="flex:1;min-height:0;overflow:auto;padding:6px 22px 20px;display:flex;flex-direction:column;gap:20px">
       {@render options?.()}
