@@ -451,9 +451,10 @@ fn check_streams(bytes: &[u8], page: u32) -> usize {
 
 #[test]
 fn pushes_never_put_q_inside_a_text_object() {
-    let (mut builds, mut bad) = (0, 0);
+    let (mut builds, mut bad, mut opened) = (0, 0, 0);
     for prefix in [RK, "letter_Lampiran", "table_BonBarangUmum"] {
         let Some(mut s) = open(prefix) else { continue };
+        opened += 1;
         s.floor_override = Some(-1e6);
         let pa = s.page(0).unwrap();
         let ids: Vec<u32> = pa.paras.iter().filter(|p| p.ed.is_some() && !p.pc_font).map(|p| p.id).collect();
@@ -471,7 +472,8 @@ fn pushes_never_put_q_inside_a_text_object() {
         }
     }
     println!("push builds scanned: {builds}, content streams with q/Q/cm inside BT or unbalanced BT/ET/q: {bad}");
-    assert!(builds > 0 && bad == 0);
+    // Samples are local-only (not in CI): nothing opened means nothing to check.
+    assert!((opened == 0 || builds > 0) && bad == 0);
 }
 
 // an edited file must be editable again
