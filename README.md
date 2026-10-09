@@ -71,7 +71,8 @@ A few things apply to every tool:
 - OCR inside PDF to Word and Excel. For scans, run Scan to text first, then convert.
 - White-out, text boxes, signatures and stamps, and font/size/colour changes in Edit PDF.
 - ZIP files as input for Compress. A folder works.
-- A macOS version.
+- A macOS version. The code builds for macOS and passes automated checks, but I don't
+  own a Mac, so it hasn't been properly tested by hand yet.
 
 This is an early release, and the version number reflects that. Bug reports and
 suggestions are welcome in [Issues](https://github.com/majimawrks/majipdf/issues).

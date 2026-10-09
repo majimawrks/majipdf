@@ -140,9 +140,7 @@ jobs:
           /Applications/majipdf.app/Contents/Resources/runtime/gs --version
           # OCR smoke: render a text page to a bitmap, recognize it, read the word back with txtwrite
           R=/Applications/majipdf.app/Contents/Resources/runtime
-          printf '%%!PS
-/Helvetica findfont 48 scalefont setfont 72 700 moveto (Tesseract smoke test) show showpage
-' > ocr.ps
+          printf '%%!PS\n/Helvetica findfont 48 scalefont setfont 72 700 moveto (Tesseract smoke test) show showpage\n' > ocr.ps
           TESSDATA_PREFIX="$R/" "$R/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfocr24 -r300 -sOCRLanguage=ind+eng -o ocr.pdf ocr.ps
           "$R/gs" -q -dNOPAUSE -dBATCH -sDEVICE=txtwrite -o - ocr.pdf | tee ocr.txt
           grep -qi tesseract ocr.txt
