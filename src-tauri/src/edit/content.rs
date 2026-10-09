@@ -844,6 +844,48 @@ pub fn rewrite(s: &Show, keep: &dyn Fn(usize) -> bool) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// Per glyph of a show op: its box in the analysis frame ([x0, y0, x1, y1]) and whether the text runs horizontally there.
+pub fn glyph_boxes(s: &Show) -> Vec<([f64; 4], bool)> {
+    let m = mul(s.tm, s.ctm);
+    let horiz = m[0].abs() >= m[1].abs();
+    let nb = s.glyphs.first().map(|g| g.nb).unwrap_or(1);
+    let (mut xt, mut gi) = (0.0f64, 0usize);
+    let mut out = vec![];
+    let fs = s.fs.abs();
+    for e in &s.elems {
+        match e {
+            El::Num(x) => xt += -x / 1000.0 * s.fs * s.th,
+            El::Str(st) => {
+                for _ in chunks(st, if nb == 2 { 2 } else { 1 }) {
+                    let adv = s.glyphs[gi].adv;
+                    let (y0, y1) = (s.rise - 0.15 * fs, s.rise + 0.75 * fs);
+                    let pts = [(xt, y0), (xt + adv, y0), (xt + adv, y1), (xt, y1)].map(|(x, y)| apply(m, x, y));
+                    out.push(([
+                        pts.iter().map(|p| p.0).fold(f64::MAX, f64::min),
+                        pts.iter().map(|p| p.1).fold(f64::MAX, f64::min),
+                        pts.iter().map(|p| p.0).fold(f64::MIN, f64::max),
+                        pts.iter().map(|p| p.1).fold(f64::MIN, f64::max),
+                    ], horiz));
+                    xt += adv;
+                    gi += 1;
+                }
+            }
+        }
+    }
+    out
+}
+
+fn overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
+    (a1.min(b1) - a0.max(b0)).max(0.0)
+}
+
+/// White-out rule (spike r2): more than half of the glyph's advance lies inside the rect and its line's y-range overlaps it.
+pub fn glyph_hit(b: [f64; 4], horiz: bool, r: [f64; 4]) -> bool {
+    let (ox, oy) = (overlap(b[0], b[2], r[0], r[2]), overlap(b[1], b[3], r[1], r[3]));
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    if horiz { w > 1e-6 && ox >= 0.5 * w && oy > 0.3 } else { h > 1e-6 && oy >= 0.5 * h && ox > 0.3 }
+}
+
 pub struct Mod {
     pub s: usize,
     pub e: usize,

@@ -2,17 +2,19 @@
 //! See _docs/edit-contract.md ("Page analysis" 5-9, "Re-typeset the new paragraph").
 use super::content::{esc, fill_css, fmt, mul, tr, Show, M};
 use super::fonts::{pc_font, win_ansi, Fnt, Kind, Pc};
+use super::{Fmt, Run};
 use lopdf::ObjectId;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
 
-#[derive(Clone, Copy, PartialEq, Debug, Serialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Align {
     Left,
     Center,
     Right,
+    #[serde(alias = "justify")]
     Justified,
 }
 
@@ -111,11 +113,18 @@ pub struct Para {
     pub pitch: f64,
     pub first_indent: f64,
     pub css_font: String,
+    pub orig_font: String,
     pub bold: bool,
     pub italic: bool,
     pub color: String,
     pub nlines: usize,
     pub ed: Option<EditData>,
+}
+
+/// Run style for a font resource.
+pub fn make_style(name: &str, f: &Fnt, size: f64, fill: &str) -> Style {
+    let sp = f.enc.get(&' ').copied();
+    Style { font: name.into(), size, fill: fill.into(), nb: f.nb, sp_code: sp, sp_w: sp.map(|c| f.w(c)).filter(|w| *w > 0.0).unwrap_or(250.0), via_tw: f.kind == Kind::Simple && sp == Some(32) }
 }
 
 pub fn family(base: &str) -> String {
@@ -306,6 +315,7 @@ fn build_para(pin: &PageIn, segs: &[Seg], lines: &[Line], p: &[usize], (body_l, 
         pitch: page_pitch,
         first_indent: 0.0,
         css_font: "Arial".into(),
+        orig_font: String::new(),
         bold: false,
         italic: false,
         color: "#000000".into(),
@@ -353,8 +363,7 @@ fn build_para(pin: &PageIn, segs: &[Seg], lines: &[Line], p: &[usize], (body_l, 
         if let Some(i) = styles.iter().position(|x| (x.font.clone(), (x.size * 100.0).round() / 100.0, x.fill.clone()) == key) {
             return i;
         }
-        let sp = f.enc.get(&' ').copied();
-        styles.push(Style { font: s.font.clone(), size: s.size, fill: s.fill.clone(), nb: f.nb, sp_code: sp, sp_w: sp.map(|c| f.w(c)).filter(|w| *w > 0.0).unwrap_or(250.0), via_tw: f.kind == Kind::Simple && sp == Some(32) });
+        styles.push(make_style(&s.font, f, s.size, &s.fill));
         styles.len() - 1
     };
     let mut words: Vec<Vec<Ch>> = vec![];
@@ -402,6 +411,7 @@ fn build_para(pin: &PageIn, segs: &[Seg], lines: &[Line], p: &[usize], (body_l, 
         let f = &pin.fonts[&st.font];
         para.size = st.size;
         para.css_font = f.css_font();
+        para.orig_font = f.base.clone();
         para.bold = f.bold;
         para.italic = f.italic;
         para.color = fill_css(&st.fill);
@@ -502,12 +512,12 @@ pub struct PcSet {
 }
 
 impl PcSet {
-    fn style(&mut self, f: &Fnt, size: f64, fill: &str) -> Result<Style, Fail> {
-        let key = (family(&f.base), f.bold, f.italic);
+    pub fn style_fam(&mut self, base: &str, bold: bool, italic: bool, size: f64, fill: &str) -> Result<Style, Fail> {
+        let key = (family(base), bold, italic);
         let idx = match self.faces.iter().position(|x| x.0 == key) {
             Some(i) => i,
             None => {
-                let pc = pc_font(&f.base, f.bold, f.italic).map_err(|_| Fail::NoPcFont)?;
+                let pc = pc_font(base, bold, italic).map_err(|_| Fail::NoPcFont)?;
                 self.faces.push((key, pc));
                 self.faces.len() - 1
             }
@@ -522,16 +532,55 @@ fn uniq(chars: impl Iterator<Item = char>) -> String {
 }
 
 /// New paragraph content: words with per-char styles and codes. Unchanged words keep their original codes.
-pub fn retype(
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn retype(ed: &EditData, fonts: &BTreeMap<String, Fnt>, used: &HashMap<ObjectId, HashSet<u32>>, text: &str, pc: Option<&mut PcSet>) -> Result<(Vec<Style>, Vec<Vec<Ch>>), Fail> {
+    retype_with(ed, fonts, used, text, pc, &Restyle::default())
+}
+
+/// Format changes of a whole paragraph (only the fields that differ from the original are set).
+#[derive(Default, Clone, Debug)]
+pub struct Restyle {
+    pub family: Option<String>, // PC family (implies the PC path)
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub scale: Option<f64>,
+    pub fill: Option<String>,
+}
+
+pub fn retype_with(
     ed: &EditData,
     fonts: &BTreeMap<String, Fnt>,
     used: &HashMap<ObjectId, HashSet<u32>>,
     text: &str,
     pc: Option<&mut PcSet>,
+    rs: &Restyle,
 ) -> Result<(Vec<Style>, Vec<Vec<Ch>>), Fail> {
     let new: Vec<&str> = text.split_whitespace().collect();
     let old: Vec<String> = ed.words.iter().map(|w| w.iter().map(|c| c.t.as_str()).collect()).collect();
-    let map = diff_words(&old, &new);
+    let scale = rs.scale.unwrap_or(1.0);
+    let mut base_styles = ed.styles.clone();
+    let mut force_all = false;
+    if pc.is_none() && (rs.bold.is_some() || rs.italic.is_some()) {
+        // the variant resource the page already has (ArialMT -> Arial-BoldMT), else the caller falls back to a PC font
+        for s in base_styles.iter_mut() {
+            let f = &fonts[&s.font];
+            let (b, i) = (rs.bold.unwrap_or(f.bold), rs.italic.unwrap_or(f.italic));
+            if (b, i) != (f.bold, f.italic) {
+                let Some((n, g)) = fonts.iter().find(|(_, g)| g.encodable && family(&g.base) == family(&f.base) && g.bold == b && g.italic == i) else {
+                    return Err(Fail::Missing(uniq(new.iter().flat_map(|w| w.chars()).take(12))));
+                };
+                *s = make_style(n, g, s.size, &s.fill);
+                force_all = true; // ponytail: a font swap restyles the whole paragraph as one run
+            }
+        }
+    }
+    for s in base_styles.iter_mut() {
+        s.size *= scale;
+        if let Some(f) = &rs.fill {
+            s.fill = f.clone();
+        }
+    }
+    let map = if force_all { vec![None; new.len()] } else { diff_words(&old, &new) };
     // style of each new word's chars: kept words own, inserted words inherit the previous word's last style (first word: the next kept one)
     let mut style_for: Vec<usize> = vec![];
     let mut prev: Option<usize> = None;
@@ -556,7 +605,7 @@ pub fn retype(
                     continue;
                 }
                 let st = style_for[k];
-                let f = &fonts[&ed.styles[st].font];
+                let f = &fonts[&base_styles[st].font];
                 let none = HashSet::new();
                 let u = f.id.and_then(|id| used.get(&id)).unwrap_or(&none);
                 let mut chars = vec![];
@@ -569,15 +618,17 @@ pub fn retype(
                 words.push(chars);
             }
             if missing.is_empty() {
-                Ok((ed.styles.clone(), words))
+                Ok((base_styles, words))
             } else {
                 Err(Fail::Missing(uniq(missing.chars())))
             }
         }
         Some(pcs) => {
             let mut styles = vec![];
-            for s in &ed.styles {
-                styles.push(pcs.style(&fonts[&s.font], s.size, &s.fill)?);
+            for s in &base_styles {
+                let f = &fonts[&ed.styles[styles.len()].font];
+                let fam = rs.family.clone().unwrap_or_else(|| f.base.clone());
+                styles.push(pcs.style_fam(&fam, rs.bold.unwrap_or(f.bold), rs.italic.unwrap_or(f.italic), s.size, &s.fill)?);
             }
             let mut bad = String::new();
             let mut words = vec![];
@@ -797,6 +848,287 @@ pub fn emit(ed: &EditData, styles: &[Style], words: &[Vec<Ch>], lines: &[LayLine
         out.push_str("ET\n");
     }
     out.into_bytes()
+}
+
+
+// ---------------- runs (selection formatting) ----------------
+
+pub struct RunOut {
+    pub styles: Vec<Style>,
+    pub words: Vec<Vec<Ch>>,
+    pub width_changed: bool, // a kept word changed font or size: Word's own line breaks no longer hold
+}
+
+fn fam_default(fonts: &BTreeMap<String, Fnt>, ed: &EditData) -> (usize, String) {
+    let mut count = vec![0usize; ed.styles.len()];
+    for c in ed.words.iter().flatten() {
+        count[c.style] += 1;
+    }
+    let dom = count.iter().enumerate().max_by_key(|x| x.1).map(|x| x.0).unwrap_or(0);
+    (dom, ed.styles.get(dom).and_then(|s| fonts.get(&s.font)).map(|f| f.base.clone()).unwrap_or_else(|| "Arial".into()))
+}
+
+enum Tg {
+    Orig(String, f64, String), // resource, size, fill
+    Pc(String, bool, bool, f64, String), // family, bold, italic, size, fill
+}
+
+/// New paragraph content from styled runs. Words that are unchanged keep their original codes where the resource stays the same
+/// (a size or colour change never needs another font); a run whose bold/italic variant or glyphs the page lacks switches to the
+/// PC family only when `use_pc` (else the characters are reported as missing). Runs may start inside a word.
+#[allow(clippy::too_many_arguments)]
+pub fn retype_runs(ed: &EditData, para_pc: bool, fonts: &BTreeMap<String, Fnt>, used: &HashMap<ObjectId, HashSet<u32>>, runs: &[Run], pcs: &mut PcSet, use_pc: bool) -> Result<RunOut, Fail> {
+    let mut words: Vec<Vec<(char, usize)>> = vec![];
+    let mut cur: Vec<(char, usize)> = vec![];
+    for (ri, r) in runs.iter().enumerate() {
+        for c in r.text.chars() {
+            if c.is_whitespace() {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            } else {
+                cur.push((c, ri));
+            }
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    let texts: Vec<String> = words.iter().map(|w| w.iter().map(|c| c.0).collect()).collect();
+    let old: Vec<String> = ed.words.iter().map(|w| w.iter().map(|c| c.t.as_str()).collect()).collect();
+    let map = diff_words(&old, &texts.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let (dom_i, fam_def) = fam_default(fonts, ed);
+    let dom_css = ed.styles.get(dom_i).and_then(|s| fonts.get(&s.font)).map(|f| f.css_font()).unwrap_or_default();
+    let none = HashSet::new();
+    let mut missing = String::new();
+    let mut tgs: Vec<Tg> = vec![];
+    for (ri, r) in runs.iter().enumerate() {
+        let fmt = &r.style;
+        let fill_new = super::build::fill_of(&fmt.color);
+        let is_orig = !para_pc && (fmt.font == "orig" || fmt.font.eq_ignore_ascii_case(&dom_css));
+        let want = (fmt.bold, fmt.italic);
+        let res = if is_orig {
+            ed.styles
+                .iter()
+                .find(|s| fonts.get(&s.font).is_some_and(|f| (f.bold, f.italic) == want))
+                .map(|s| s.font.clone())
+                .or_else(|| {
+                    let f0 = fonts.get(&ed.styles.get(dom_i)?.font)?;
+                    fonts.iter().find(|(_, g)| g.encodable && family(&g.base) == family(&f0.base) && (g.bold, g.italic) == want).map(|(n, _)| n.clone())
+                })
+        } else {
+            None
+        };
+        let mut ok_tg = None;
+        if let Some(res) = res {
+            let fill = ed.styles.iter().find(|s| s.font == res && fill_css(&s.fill).eq_ignore_ascii_case(&fmt.color)).map(|s| s.fill.clone()).unwrap_or_else(|| fill_new.clone());
+            let f = &fonts[&res];
+            let u = f.id.and_then(|id| used.get(&id)).unwrap_or(&none);
+            let mut bad = String::new();
+            for (k, w) in words.iter().enumerate() {
+                for (ci, (c, rj)) in w.iter().enumerate() {
+                    if *rj != ri {
+                        continue;
+                    }
+                    let reuse = map[k].and_then(|o| ed.words[o].get(ci)).is_some_and(|oc| ed.styles[oc.style].font == res);
+                    if !reuse && f.code_for(*c, u).is_none() {
+                        bad.push(*c);
+                    }
+                }
+            }
+            if bad.is_empty() {
+                ok_tg = Some(Tg::Orig(res, fmt.size, fill));
+            } else if !use_pc {
+                missing.push_str(&bad);
+            }
+        } else if is_orig && !use_pc {
+            missing.extend(r.text.chars().filter(|c| !c.is_whitespace()));
+        }
+        tgs.push(match ok_tg {
+            Some(t) => t,
+            None => Tg::Pc(if is_orig || para_pc { fam_def.clone() } else { fmt.font.clone() }, fmt.bold, fmt.italic, fmt.size, fill_new),
+        });
+    }
+    if para_pc && !use_pc {
+        missing.extend(runs.iter().flat_map(|r| r.text.chars()).filter(|c| !c.is_whitespace()));
+    }
+    if !missing.is_empty() {
+        return Err(Fail::Missing(uniq(missing.chars())));
+    }
+    let mut styles = ed.styles.clone();
+    let mut sidx: Vec<usize> = vec![];
+    for tg in &tgs {
+        let st = match tg {
+            Tg::Orig(res, size, fill) => make_style(res, &fonts[res], *size, fill),
+            Tg::Pc(fam, b, i, size, fill) => pcs.style_fam(fam, *b, *i, *size, fill)?,
+        };
+        let at = styles.iter().position(|x| x.font == st.font && (x.size - st.size).abs() < 0.01 && fill_css(&x.fill).eq_ignore_ascii_case(&fill_css(&st.fill)));
+        sidx.push(match at {
+            Some(i) => i,
+            None => {
+                styles.push(st);
+                styles.len() - 1
+            }
+        });
+    }
+    let mut out: Vec<Vec<Ch>> = vec![];
+    let mut bad = String::new();
+    let mut width_changed = false;
+    for (k, w) in words.iter().enumerate() {
+        let own = map[k].map(|o| &ed.words[o]);
+        let mut chars = vec![];
+        for (ci, (c, ri)) in w.iter().enumerate() {
+            let si = sidx[*ri];
+            let oc = own.and_then(|o| o.get(ci));
+            if let Some(oc) = oc {
+                let os = &ed.styles[oc.style];
+                width_changed |= os.font != styles[si].font || (os.size - styles[si].size).abs() > 0.01;
+            }
+            match &tgs[*ri] {
+                Tg::Orig(res, ..) => {
+                    if let Some(oc) = oc.filter(|oc| ed.styles[oc.style].font == *res) {
+                        chars.push(Ch { style: si, ..oc.clone() });
+                    } else {
+                        let f = &fonts[res];
+                        let u = f.id.and_then(|id| used.get(&id)).unwrap_or(&none);
+                        let code = f.code_for(*c, u).ok_or_else(|| Fail::Missing(c.to_string()))?;
+                        chars.push(Ch { t: c.to_string(), code: Some(code), w: f.w(code), kern: 0.0, gap: 0.0, style: si });
+                    }
+                }
+                Tg::Pc(..) => match win_ansi(*c) {
+                    Some(code) if face_w(pcs, &styles[si].font, code) > 0.0 => chars.push(Ch { t: c.to_string(), code: Some(code as u32), w: face_w(pcs, &styles[si].font, code), kern: 0.0, gap: 0.0, style: si }),
+                    _ => bad.push(*c),
+                },
+            }
+        }
+        out.push(chars);
+    }
+    if !bad.is_empty() {
+        return Err(Fail::Unsupported(uniq(bad.chars())));
+    }
+    Ok(RunOut { styles, words: out, width_changed })
+}
+
+/// Largest run size on each line relative to `dom` (1.0 for an empty line).
+pub fn line_scales(lines: &[LayLine], words: &[Vec<Ch>], styles: &[Style], dom: f64) -> Vec<f64> {
+    lines
+        .iter()
+        .map(|l| {
+            let m = l.words.iter().flat_map(|&w| words[w].iter()).map(|c| styles[c.style].size).fold(0.0, f64::max);
+            if m > 0.0 && dom > 0.0 { m / dom } else { 1.0 }
+        })
+        .collect()
+}
+
+/// The content as styled runs (adjacent equal styles merged); spaces take the style of the word before them.
+pub fn runs_from_words(words: &[Vec<Ch>], styles: &[Style], fmt_of: &dyn Fn(&Style) -> Fmt) -> Vec<Run> {
+    let mut out: Vec<Run> = vec![];
+    let mut put = |t: &str, f: Fmt| match out.last_mut() {
+        Some(r) if r.style == f => r.text.push_str(t),
+        _ => out.push(Run { text: t.to_string(), style: f }),
+    };
+    for (k, w) in words.iter().enumerate() {
+        for c in w {
+            put(&c.t, fmt_of(&styles[c.style]));
+        }
+        if k + 1 < words.len() {
+            if let Some(c) = w.last() {
+                put(" ", fmt_of(&styles[c.style]));
+            }
+        }
+    }
+    out
+}
+
+/// Display name of a PC face key (family without spaces, lower case).
+pub fn pc_family_name(key: &str) -> String {
+    super::fonts::FAMILIES.iter().find(|f| family(f) == key).map(|f| f.to_string()).unwrap_or_else(|| "Arial".into())
+}
+
+// ---------------- text boxes ----------------
+
+pub enum BoxItem {
+    Ch(Ch),
+    Space,
+    Break(f64), // hard line break; the size of an empty line it ends
+}
+
+pub struct BoxOut {
+    pub styles: Vec<Style>,
+    pub words: Vec<Vec<Ch>>,
+    pub lines: Vec<LayLine>,
+    pub ed: EditData,
+    pub height: f64,
+}
+
+/// Typesets styled free text (hard line breaks, empty lines, mixed sizes) in a box `width` pt wide.
+/// Local frame: x right from 0, y up from the top edge; a line is 1.15 x its largest size high, its baseline 0.86 x that below its top.
+pub fn box_layout_items(items: Vec<BoxItem>, styles: Vec<Style>, align: Align, width: f64, default_size: f64) -> BoxOut {
+    let mut words: Vec<Vec<Ch>> = vec![];
+    let mut cur: Vec<Ch> = vec![];
+    let mut paras: Vec<(usize, usize, f64)> = vec![]; // first word, count, size of an empty line
+    let mut first = 0;
+    for it in items {
+        match it {
+            BoxItem::Ch(c) => cur.push(c),
+            BoxItem::Space => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            BoxItem::Break(sz) => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+                paras.push((first, words.len() - first, sz));
+                first = words.len();
+            }
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    paras.push((first, words.len() - first, default_size));
+    let mut ed = EditData {
+        line_words: vec![],
+        line_r: vec![],
+        line_base: vec![],
+        shows: vec![],
+        words: vec![],
+        styles: styles.clone(),
+        nlines: 0,
+        pitch: 1.15 * default_size,
+        first_x: 0.0,
+        left_x: 0.0,
+        right_x: width,
+        centre: width / 2.0,
+        base0: -0.86 * default_size,
+        top: 0.0,
+        bottom: 0.0,
+        align,
+        size: default_size,
+    };
+    let mut lines: Vec<LayLine> = vec![];
+    let mut line_size: Vec<f64> = vec![];
+    for (first, n, empty) in paras {
+        if n == 0 {
+            lines.push(LayLine { x: 0.0, words: vec![], gap: 0.0 });
+            line_size.push(empty);
+            continue;
+        }
+        for mut l in typeset(&ed, &styles, &words[first..first + n]) {
+            l.words.iter_mut().for_each(|w| *w += first);
+            line_size.push(l.words.iter().flat_map(|&w| words[w].iter()).map(|c| styles[c.style].size).fold(0.0, f64::max));
+            lines.push(l);
+        }
+    }
+    let mut top = 0.0;
+    for sz in &line_size {
+        ed.line_base.push(top - 0.86 * sz);
+        top -= 1.15 * sz;
+    }
+    ed.base0 = ed.line_base.first().copied().unwrap_or(ed.base0);
+    BoxOut { styles, words, lines, ed, height: -top }
 }
 
 #[cfg(test)]

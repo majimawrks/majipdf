@@ -6,7 +6,7 @@
   import { chooseFiles } from "../tauri";
   import { addFilesToTool } from "../files";
   import { isLocked } from "../compress";
-  import { openFor, applyEditor, undo, redo, startSave, keepEditing, chooseAnother, confirmLeave, cancelLeave, closeEditor } from "../edit";
+  import { openFor, applyEditor, undo, redo, startSave, keepEditing, chooseAnother, confirmLeave, cancelLeave, closeEditor, setTool, escTool, clearSel, deleteSel, nudge, openBoxEditor, type Obj } from "../edit";
   import ToolFrame from "./ToolFrame.svelte";
   import PasswordForm from "./PasswordForm.svelte";
   import SignedDialog from "./SignedDialog.svelte";
@@ -15,6 +15,9 @@
   import ErrorCard from "./ErrorCard.svelte";
   import Thumb from "./Thumb.svelte";
   import EditPage from "./EditPage.svelte";
+  import FormatPanel from "./FormatPanel.svelte";
+  import SigPopover from "./SigPopover.svelte";
+  import SigDraw from "./SigDraw.svelte";
 
   const e = app.edit;
   const PX = 96 / 72; // px per pt at 100 %
@@ -75,20 +78,54 @@
     if (p.length) await addFilesToTool(p);
   }
 
-  // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z when no editor (or other field) has focus.
+  const TOOLS = [
+    ["text", "cursor-text", "editToolText"],
+    ["add", "text-t", "editToolAdd"],
+    ["wo", "eraser", "editToolWo"],
+    ["sig", "signature", "editToolSig"],
+  ] as const;
+  let sigBtn = $state<HTMLButtonElement>();
+  const selObj = $derived<Obj | undefined>(e.sel ? e.models[e.sel.page]?.objs?.find((o) => o.id === e.sel!.id) : undefined);
+  const hint = $derived(({ text: "editHint", add: "editHintAdd", wo: "editHintWo", sig: "editHintSig" } as const)[e.tool]);
+
+  // Esc: cancel the open editor, else back to Edit text, else deselect. Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, Delete and arrows
+  // when no editor (or other field) has focus.
   function onkeydown(ev: KeyboardEvent) {
-    if (ev.key === "Escape" && e.editing && !e.leaveAsk && !signedOpen) {
-      ev.preventDefault();
-      closeEditor(); // Esc cancels even when focus sits on a bar button
+    if (e.drawOpen || e.leaveAsk || signedOpen) return; // the modal / dialog owns the keys
+    if (ev.key === "Escape") {
+      if (e.editing) {
+        ev.preventDefault();
+        closeEditor(); // Esc cancels even when focus sits on a bar button
+      } else if (e.tool !== "text" || e.sigOpen || e.woBar || e.sel) {
+        ev.preventDefault();
+        escTool();
+        clearSel();
+      } else if (e.sel) {
+        ev.preventDefault();
+        clearSel();
+      }
       return;
     }
-    if (!ready || app.tool.phase !== "loaded" || e.editing || e.leaveAsk || signedOpen) return;
+    if (!ready || app.tool.phase !== "loaded" || e.editing) return;
     const el = ev.target as HTMLElement | null;
-    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
-    if (!(ev.ctrlKey || ev.metaKey)) return;
-    const k = ev.key.toLowerCase();
-    if (k === "z" && !ev.shiftKey) (ev.preventDefault(), void undo());
-    else if (k === "y" || (k === "z" && ev.shiftKey)) (ev.preventDefault(), void redo());
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
+    if (ev.ctrlKey || ev.metaKey) {
+      const k = ev.key.toLowerCase();
+      if (k === "z" && !ev.shiftKey) (ev.preventDefault(), void undo());
+      else if (k === "y" || (k === "z" && ev.shiftKey)) (ev.preventDefault(), void redo());
+      return;
+    }
+    if (!selObj || e.sigOpen) return;
+    const n = ev.shiftKey ? 10 : 1;
+    const d = ({ ArrowLeft: [-n, 0], ArrowRight: [n, 0], ArrowUp: [0, -n], ArrowDown: [0, n] } as Record<string, [number, number]>)[ev.key];
+    if (ev.key === "Delete" || ev.key === "Backspace") {
+      // only from the page area or body: never while focus sits on a button, link or control of a panel or popover
+      if (el && el !== document.body && !el.closest?.("[id^=ep-]")) return;
+      ev.preventDefault();
+      deleteSel();
+    }
+    else if (d) (ev.preventDefault(), nudge(d[0], d[1]));
+    else if (ev.key === "Enter" && selObj.kind === "textbox" && e.sel) (ev.preventDefault(), openBoxEditor(e.sel.page, selObj.id));
   }
 
   // A click anywhere outside the open editor applies it. While a warning bar shows, a stray click does nothing
@@ -156,6 +193,13 @@
   />
 {/if}
 
+{#if e.drawOpen}
+  <SigDraw />
+{/if}
+{#if e.sigOpen && sigBtn}
+  <SigPopover anchor={sigBtn} />
+{/if}
+
 {#if e.leaveAsk}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
@@ -212,6 +256,22 @@
           aria-label={t("editName")}
           style="flex-shrink:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface)"
         >
+          <div role="group" aria-label={t("editTools")} style="display:flex;padding:3px;border-radius:10px;background:var(--surface2);gap:2px">
+            {#each TOOLS as [id, icon, key] (id)}
+              {@const on = e.tool === id}
+              <button
+                bind:this={sigBtn}
+                aria-pressed={on}
+                aria-haspopup={id === "sig" ? "dialog" : undefined}
+                aria-expanded={id === "sig" ? e.sigOpen : undefined}
+                onclick={() => setTool(id)}
+                style="min-height:32px;padding:0 10px;border-radius:7px;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:14px;font-weight:600;white-space:nowrap;color:{on ? 'var(--accent-text)' : 'var(--text2)'};background:{on ? 'var(--surface)' : 'transparent'};box-shadow:{on ? '0 1px 2px rgba(0,0,0,.12)' : 'none'}"
+                ><i class="ph ph-{icon}" style="font-size:17px"></i>{t(key)}</button
+              >
+            {/each}
+          </div>
+          <span aria-hidden="true" style="width:1px;height:22px;background:var(--line);margin:0 4px"></span>
+          <div style="display:flex;align-items:center;gap:6px">
           <button style={tbtn} onclick={() => step(-10)} disabled={pct <= 50} aria-label={t("editZoomOut")} title={t("editZoomOut")}
             ><i class="ph ph-minus" style="font-size:16px"></i></button
           >
@@ -220,13 +280,16 @@
             ><i class="ph ph-plus" style="font-size:16px"></i></button
           >
           <button style={tbtn} onclick={() => (zoom = "fit")} aria-pressed={zoom === "fit"}>{t("editFit")}</button>
+          </div>
           <span style="flex:1"></span>
           <span style="color:var(--text2);font-size:14px;font-variant-numeric:tabular-nums">{t("pageAria", { n: cur + 1 })} / {fmtNum(pages)}</span>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           bind:this={scroller}
           bind:clientWidth={viewW}
           {onscroll}
+          onpointerdown={(ev) => ev.target === scroller && clearSel()}
           style="flex:1;min-height:0;overflow:auto;background:var(--surface2);padding:20px 24px 40px;display:flex;flex-direction:column;gap:18px"
         >
           {#each { length: pages } as _, i (i)}
@@ -262,7 +325,14 @@
 
 {#snippet options()}
   {#if ready}
-    <div style="color:var(--text2)">{t("editHint")}</div>
+    {#if e.fmt}<FormatPanel />{/if}
+    <div style="color:var(--text2)">{t(hint)}</div>
+    {#if selObj}
+      <button style="{btn};color:var(--err);align-self:flex-start" onclick={deleteSel} disabled={e.busy}><i class="ph ph-trash" style="font-size:16px"></i>{t("objDelete")}</button>
+    {/if}
+    {#if e.objError}
+      <div role="alert" style="padding:10px 12px;border-radius:12px;background:var(--err-soft);font-size:14.5px;overflow-wrap:anywhere">{e.objError}</div>
+    {/if}
     <div style="display:flex;flex-direction:column;gap:10px">
       <div aria-live="polite" style="font-weight:600;color:{e.hist.count ? 'var(--accent-text)' : 'var(--text2)'}">{t("editChanges", { n: fmtNum(e.hist.count) })}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">

@@ -1,5 +1,5 @@
 import { clearThumbCache } from "./thumbcache";
-import type { EditDoc, EditHistory, EditSaveRes, PageModel } from "./edit";
+import type { EditDoc, EditHistory, EditSaveRes, PageModel, Style, Run, ObjReq, SigItem } from "./edit";
 
 export const isMac = /Mac/.test(navigator.userAgent);
 
@@ -140,10 +140,29 @@ export interface OcrResult {
 }
 
 // Edit PDF: the open in-place editor (contract types live in edit.ts)
-export interface Editing {
+export type EditTool = "text" | "add" | "wo" | "sig";
+// Format panel target: a paragraph whose editor is open, or a text box (selected or being edited)
+export interface Fmt {
+  kind: "para" | "box";
   page: number;
-  id: number;
-  text: string;
+  id: number | null; // null = a new text box that is still a draft
+  style: Style; // shown in the panel: style at the editor selection start
+  mixed: string[]; // fields that differ across the selection (shown blank)
+  origName: string; // shown in "Original (name)"
+  origOk: boolean; // "Original" is offered
+}
+export interface Editing {
+  kind: "para" | "box";
+  page: number;
+  id: number | null; // null = new text box (draft, placed on first apply)
+  rect?: [number, number, number, number]; // draft box rect, display pt
+  rot?: 0 | 90 | 180 | 270; // draft box rotation
+  text: string; // concatenation of runs
+  runs: Run[];
+  base: Style; // style for text typed into an empty editor
+  rev: number; // bumped when the editor DOM must be rebuilt from runs
+  selS: number; // selection in the editor, as text offsets
+  selE: number;
   usePc: boolean;
   applying: boolean;
   bar: null | { kind: "missing"; chars: string } | { kind: "unsupported"; chars: string } | { kind: "overflow"; n: number } | { kind: "cannot_push" } | { kind: "error"; text: string };
@@ -314,6 +333,16 @@ export const app = $state({
     hist: { can_undo: false, can_redo: false, count: 0, changed_pages: [] } as EditHistory,
     dirty: false, // unsaved changes since open / last save
     editing: null as Editing | null,
+    tool: "text" as EditTool,
+    sel: null as { page: number; id: number } | null, // selected placed object
+    fmt: null as Fmt | null,
+    armed: null as SigItem | null, // library item waiting to be placed
+    sigs: [] as SigItem[],
+    fonts: [] as string[],
+    sigOpen: false,
+    drawOpen: false,
+    woBar: null as { page: number; req: ObjReq; rect: [number, number, number, number] } | null, // whiteout_partial warning (request not applied)
+    objError: "",
     leaveAsk: false,
     busy: false, // an undo/redo/apply call is in flight
     error: "",

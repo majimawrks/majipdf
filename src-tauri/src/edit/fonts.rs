@@ -493,6 +493,25 @@ pub fn pc_font(base: &str, bold: bool, italic: bool) -> Result<Pc, String> {
     Ok(Pc { file, bytes, widths })
 }
 
+pub const FAMILIES: [&str; 7] = ["Arial", "Times New Roman", "Calibri", "Tahoma", "Verdana", "Courier New", "Bookman Old Style"];
+
+/// PC families whose regular TTF exists on this machine.
+pub fn available_families() -> Vec<String> {
+    FAMILIES.iter().filter(|f| { let r = family_files(f)[0]; find_font(&[r[0], r[1]]).is_some() }).map(|s| s.to_string()).collect()
+}
+
+/// Measuring view of an embedded PC font (resource MjFn), for glyph removal inside our own appended text.
+pub fn pc_fnt(name: &str, pc: &Pc) -> Fnt {
+    let mut f = Fnt { name: name.into(), nb: 1, dw: 1000.0, first: 32, widths: pc.widths[32..].to_vec(), measurable: true, encodable: true, ..Default::default() };
+    for c in 32..=255u8 {
+        if let Some(ch) = cp1252(c) {
+            f.dec.insert(c as u32, ch.to_string());
+            f.enc.entry(ch).or_insert(c as u32);
+        }
+    }
+    f
+}
+
 /// Embeds the font as a simple WinAnsi TrueType font; returns the Font dict object.
 pub fn embed_pc(doc: &mut Document, pc: &Pc) -> ObjectId {
     let face = ttf_parser::Face::parse(&pc.bytes, 0).expect("checked in pc_font");

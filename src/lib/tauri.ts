@@ -65,6 +65,14 @@ export async function chooseFiles(multiple: boolean): Promise<string[]> {
   return Array.isArray(result) ? result : [result];
 }
 
+/** Signature / stamp source image (PNG, JPG or a PDF's first page). */
+export async function chooseImage(): Promise<string | null> {
+  if (!inTauri) return "C:/mock/scan_tanda_tangan.png";
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const result = await open({ multiple: false, filters: [{ name: "PNG, JPG, PDF", extensions: ["png", "jpg", "jpeg", "pdf"] }] });
+  return (result as string | null) ?? null;
+}
+
 export async function chooseFolder(): Promise<string[]> {
   if (!inTauri) return ["C:/mock/folder"];
   const { open } = await import("@tauri-apps/plugin-dialog");
