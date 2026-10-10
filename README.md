@@ -53,7 +53,17 @@ or block it. If your IT team blocks it, that's the reason.
   PDF's own font, and the text below moves to make room. If the font is missing a letter
   you typed, you can switch that paragraph to a similar font from your computer. Works
   best on PDFs made from Word; text in scans, repeated footers and unusual fonts stays
-  locked. Undo and redo, and the result is saved as `<name>_edited.pdf`.
+  locked. You can also:
+  - make selected words bold, italic, bigger or another colour, or change a paragraph's
+    font and alignment;
+  - white out an area. What's under it is really removed, not just covered, so it
+    can't be copied back out, and this works on scanned pages too;
+  - add text boxes anywhere on the page;
+  - place a signature or stamp, either imported from a photo or scan (the white
+    background is removed for you) or drawn with the mouse or a pen. Your signatures
+    are kept on this computer only, ready for next time.
+
+  Undo and redo work across everything, and the result is saved as `<name>_edited.pdf`.
 
 A few things apply to every tool:
 
@@ -69,7 +79,8 @@ A few things apply to every tool:
 ## Not there yet
 
 - OCR inside PDF to Word and Excel. For scans, run Scan to text first, then convert.
-- White-out, text boxes, signatures and stamps, and font/size/colour changes in Edit PDF.
+- Moving or deleting existing images and text blocks, watermarks, and headers/footers
+  in Edit PDF.
 - ZIP files as input for Compress. A folder works.
 - A macOS version. The code builds for macOS and passes automated checks, but I don't
   own a Mac, so it hasn't been properly tested by hand yet.
