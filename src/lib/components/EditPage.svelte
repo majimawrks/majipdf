@@ -339,7 +339,7 @@
   }
 
   const btn = "min-height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:14px;cursor:pointer;white-space:nowrap";
-  const btnPrimary = "min-height:32px;padding:0 12px;border-radius:8px;border:0;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap";
+  const btnPrimary = "min-height:32px;padding:0 12px;border-radius:8px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap";
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -447,7 +447,7 @@
         {onpaste}
         spellcheck="false"
         aria-label={t("editName")}
-        style="display:block;box-sizing:border-box;margin:0;padding:0;border:0;white-space:pre-wrap;overflow-wrap:anywhere;outline:2px solid var(--accent);outline-offset:2px;background:var(--surface);color:var(--text);width:{tw}px;min-height:{th}px;font-family:{fontOf(p.font)};font-size:{p.size * scale}px;line-height:{p.pitch * scale}px;text-align:{p.align === 'justified' ? 'justify' : p.align};text-indent:{p.indent * scale}px;opacity:{ed.applying ? 0.7 : 1}"
+        style="display:block;box-sizing:border-box;margin:0;padding:0;border:0;white-space:pre-wrap;overflow-wrap:anywhere;outline:2px solid var(--accent);outline-offset:2px;background:#FFF1E6;color:#000;caret-color:#000;width:{tw}px;min-height:{th}px;font-family:{fontOf(p.font)};font-size:{p.size * scale}px;line-height:{p.pitch * scale}px;text-align:{p.align === 'justified' ? 'justify' : p.align};text-indent:{p.indent * scale}px;opacity:{ed.applying ? 0.7 : 1}"
       ></div>
       </div>
     </div>

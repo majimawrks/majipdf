@@ -28,10 +28,10 @@
 </script>
 
 <div style="flex:1;min-height:0;overflow:auto">
-  <div style="max-width:1120px;margin:0 auto;padding:26px 32px 32px;display:flex;flex-direction:column;gap:26px">
+  <div class="home-wrap" style="max-width:1120px;margin:0 auto;padding:26px 32px 32px;display:flex;flex-direction:column;gap:26px">
     {#if !app.home.droppedFile}
       <div
-        style="display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;height:160px;padding:18px 24px;border-radius:20px;border:2px dashed {app.dragging
+        class="home-drop" style="display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;height:160px;padding:18px 24px;border-radius:20px;border:2px dashed {app.dragging
           ? 'var(--accent)'
           : 'var(--line2)'};background:{app.dragging ? 'var(--accent-soft)' : 'var(--surface)'}"
       >
@@ -48,7 +48,7 @@
         </div>
         <button
           onclick={homeChoose}
-          style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer;flex-shrink:0"
+          style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer;flex-shrink:0"
         >
           <i class="ph ph-folder-open" style="font-size:19px"></i>{t("choose")}
         </button>
@@ -109,7 +109,7 @@
 
     <div style="display:flex;flex-direction:column;gap:14px">
       <h2 style="margin:0;font-size:17px;font-weight:600;color:var(--text2)">{t("toolsHeading")}</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:14px">
+      <div class="home-tools" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:14px">
         {#each TOOL_ORDER as id (id)}
           {@const needs = id === "word" && !app.office.word ? t("needsWord") : ""}
           <button
@@ -161,5 +161,12 @@
 <style>
   .hover-accent-border:hover {
     border-color: var(--accent);
+  }
+  /* Short windows (1366x768 @100%, 1920x1080 @150%): keep both tool rows on screen. */
+  @media (max-height: 720px) {
+    .home-wrap { padding: 16px 32px 18px !important; gap: 16px !important; }
+    .home-drop { height: 110px !important; }
+    .home-tools { gap: 10px !important; }
+    .home-tools > :global(*) { padding: 12px 16px 10px !important; }
   }
 </style>

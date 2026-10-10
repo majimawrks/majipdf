@@ -34,7 +34,7 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button
         onclick={onretry}
-        style="min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer">{retryLabel ?? t("tryAnother")}</button
+        style="min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer">{retryLabel ?? t("tryAnother")}</button
       >
       <button
         onclick={copy}

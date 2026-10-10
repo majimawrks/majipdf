@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "majipdf",
-        "width": 1100,
-        "height": 720,
+        "width": 1170,
+        "height": 766,
         "minWidth": 900,
         "minHeight": 600,
         "visible": false

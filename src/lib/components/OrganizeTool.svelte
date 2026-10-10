@@ -209,7 +209,7 @@
         <button onclick={() => (o.pendingFile = null)} style={btn}>{t("orgReplaceNo")}</button>
         <button
           onclick={confirmReplace}
-          style="min-height:40px;padding:0 16px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-ink);font-size:15px;font-weight:600;cursor:pointer">{t("orgReplaceYes")}</button
+          style="min-height:40px;padding:0 16px;border-radius:10px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:15px;font-weight:600;cursor:pointer">{t("orgReplaceYes")}</button
         >
       </div>
     {/if}
@@ -286,7 +286,7 @@
                 {/if}
               </span>
               {#if on}
-                <span style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center">
+                <span style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--accent-fill);color:var(--accent-ink);display:grid;place-items:center">
                   <i class="ph ph-check" style="font-size:13px"></i>
                 </span>
               {/if}

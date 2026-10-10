@@ -23,7 +23,7 @@
   >
     <img src={logo} alt="" width="30" height="30" style="display:block" />
     <span style="font-weight:700;font-size:18px;letter-spacing:-0.01em;white-space:nowrap"
-      >maji<span style="color:var(--accent-text)">pdf</span></span
+      ><span style="color:var(--logo-gold)">maji</span><span style="color:var(--accent-text)">pdf</span></span
     >
   </button>
 

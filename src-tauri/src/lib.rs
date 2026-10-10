@@ -88,6 +88,20 @@ fn office_status() -> OfficeStatus {
     office_status_impl()
 }
 
+/// The configured size (logical px) is too tall for small or highly scaled screens
+/// (1366×768 @100 %, 1920×1080 @150 %): shrink to the monitor's work area, title bar included, and center.
+fn fit_to_screen(w: &tauri::WebviewWindow) {
+    let (Ok(Some(m)), Ok(outer), Ok(inner)) = (w.current_monitor(), w.outer_size(), w.inner_size()) else { return };
+    let area = m.work_area().size;
+    let max_w = area.width.saturating_sub(outer.width.saturating_sub(inner.width));
+    let max_h = area.height.saturating_sub(outer.height.saturating_sub(inner.height));
+    if inner.width <= max_w && inner.height <= max_h {
+        return;
+    }
+    let _ = w.set_size(tauri::PhysicalSize::new(inner.width.min(max_w), inner.height.min(max_h)));
+    let _ = w.center();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     runtime::harden();
@@ -102,6 +116,7 @@ pub fn run() {
             runtime::init(&app.package_info().version.to_string());
             runtime::warm();
             if let Some(w) = app.get_webview_window("main") {
+                fit_to_screen(&w);
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(3));
                     let _ = w.show();

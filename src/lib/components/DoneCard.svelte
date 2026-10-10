@@ -21,7 +21,7 @@
   const location = $derived(dir ? t("savedIn", { dir }) : settings.outMode === "folder" ? t("savedFolder") : t("savedNextTo"));
 
   const btn = "display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 20px;border-radius:12px;font-size:16px;cursor:pointer;";
-  const primary = btn + "border:0;background:var(--accent);color:var(--accent-ink);font-weight:600";
+  const primary = btn + "border:0;background:var(--accent-fill);color:var(--accent-ink);font-weight:600";
   const secondary = btn + "border:1px solid var(--line2);background:var(--surface);color:var(--text)";
   const quiet = btn + "border:0;background:none;color:var(--accent-text);font-weight:600";
 </script>

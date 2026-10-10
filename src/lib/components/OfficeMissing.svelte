@@ -40,7 +40,7 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:4px">
       <button
         onclick={checkAgain}
-        style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 20px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer"
+        style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 20px;border-radius:12px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer"
       >
         <i class="ph ph-arrow-clockwise" style="font-size:18px"></i>{t("checkAgain")}
       </button>

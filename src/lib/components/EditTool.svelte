@@ -221,7 +221,7 @@
         >
         <button
           onclick={confirmLeave}
-          style="min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer">{t("editLeaveYes")}</button
+          style="min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer">{t("editLeaveYes")}</button
         >
       </div>
     </div>

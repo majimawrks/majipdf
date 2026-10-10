@@ -42,7 +42,7 @@
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center">
         <button
           onclick={choose}
-          style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer"
+          style="display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 22px;border-radius:12px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:16px;font-weight:600;cursor:pointer"
         >
           <i class="ph ph-folder-open" style="font-size:19px"></i>{t("choose")}
         </button>

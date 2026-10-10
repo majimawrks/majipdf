@@ -32,7 +32,7 @@
     </button>
     <img src={logo} alt="" width="72" height="72" style="display:block" />
     <h2 id="about-title" style="margin:14px 0 2px;font-size:22px;font-weight:700;letter-spacing:-0.01em">
-      maji<span style="color:var(--accent-text)">pdf</span>
+      <span style="color:var(--logo-gold)">maji</span><span style="color:var(--accent-text)">pdf</span>
     </h2>
     <div style="color:var(--text2);font-size:14.5px;font-variant-numeric:tabular-nums">{t("aboutVersion", { v: __APP_VERSION__ })}</div>
     <div style="margin-top:18px;line-height:1.5">

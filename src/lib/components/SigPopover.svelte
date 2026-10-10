@@ -87,7 +87,7 @@
   const focus = (n: HTMLInputElement) => (n.focus(), n.select());
 
   const btn = "min-height:38px;padding:0 12px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:15px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap";
-  const btnP = "min-height:38px;padding:0 14px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-ink);font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap";
+  const btnP = "min-height:38px;padding:0 14px;border-radius:10px;border:0;background:var(--accent-fill);color:var(--accent-ink);font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap";
 </script>
 
 <svelte:window {onpointerdown} />
