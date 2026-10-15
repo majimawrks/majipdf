@@ -13,6 +13,7 @@
   import DoneCard from "./DoneCard.svelte";
   import ErrorCard from "./ErrorCard.svelte";
   import Thumb from "./Thumb.svelte";
+  import OcrCard from "./OcrCard.svelte";
 
   const run = app.word.run;
   const SHOWN = 6;
@@ -22,6 +23,10 @@
   const pw = $derived(file ? (app.compress.passwords[file.path] ?? null) : null);
   const pages = $derived(file?.pages ?? 0);
   const scanned = $derived(!!file?.scanned);
+  $effect(() => {
+    file?.path;
+    app.word.ocr = true; // new file: OCR back on
+  });
 
   // 1 Hz tick drives the estimate while running.
   let now = $state(Date.now());
@@ -32,11 +37,14 @@
 
   const est = $derived(estimateSec(run.pages));
   const elapsed = $derived(Math.max(0, (now - run.startedAt) / 1000));
-  const percent = $derived(Math.floor(Math.min(95, (elapsed / est) * 100)));
+  const percent = $derived(
+    run.progress?.stage === "ocr" ? Math.floor(((run.progress.done ?? 0) / Math.max(1, run.progress.total ?? 0)) * 100) : Math.floor(Math.min(95, (elapsed / est) * 100))
+  );
   const stageKey = $derived(
     run.progress?.stage === "converting" ? "wordStageConv" : run.progress?.stage === "saving" ? "wordStageSave" : "wordStagePrep"
   );
   const status = $derived.by(() => {
+    if (run.progress?.stage === "ocr") return t("ocrStage", { n: run.progress.done ?? 0, total: run.progress.total ?? 0 });
     const st = t(stageKey);
     const left = est - elapsed;
     if (left <= 0) return t("wordAlmost", { st });
@@ -76,7 +84,7 @@
   <ToolFrame
     files={file ? [file] : []}
     canRun={!!file && !locked && !!pages}
-    runLabel={scanned ? t("convertAnyway") : t("wordRun")}
+    runLabel={scanned && !locked && !app.word.ocr ? t("convertAnyway") : t("wordRun")}
     onrun={() => void startRun()}
     {main}
     {options}
@@ -86,13 +94,7 @@
 {#snippet main()}
   {#if file}
     {#if scanned && !locked}
-      <div role="note" style="display:flex;gap:12px;padding:14px 16px;border-radius:14px;background:var(--warn-soft);color:var(--warn)">
-        <i class="ph ph-warning" style="font-size:22px;flex-shrink:0;margin-top:1px"></i>
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <div style="font-weight:700">{t("scannedTitle")}</div>
-          <div style="font-size:14px">{t("scannedWord")}</div>
-        </div>
-      </div>
+      <OcrCard on={app.word.ocr} kind="Word" onchange={(v) => (app.word.ocr = v)} />
     {/if}
     <div style="display:flex;align-items:center;gap:14px">
       {#if locked}
@@ -133,4 +135,7 @@
 
 {#snippet options()}
   <div style="color:var(--text2)">{t("wordNote")}</div>
+  {#if scanned && !locked}
+    <div style="font-size:14px;font-weight:600;color:{app.word.ocr ? 'var(--accent-text)' : 'var(--warn)'}">{app.word.ocr ? t("ocrIndOn") : t("ocrIndOff")}</div>
+  {/if}
 {/snippet}

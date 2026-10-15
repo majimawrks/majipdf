@@ -25,6 +25,8 @@ async function run(engine: "own" | "excel") {
   r.pages = f.pages ?? 0;
   r.startedAt = Date.now();
   r.engine = engine;
+  const ocr = engine === "own" && x.ocr && !!f.scanned;
+  r.usedOcr = ocr;
   r.progress = null;
   r.error = "";
   r.v2 = null;
@@ -41,6 +43,7 @@ async function run(engine: "own" | "excel") {
       sheet_mode: x.sheetMode,
       numbers: x.numbers,
       out_mode: settings.outMode,
+      ocr,
     });
     if (settled(undefined, back())) return;
     if (id !== runId) return;

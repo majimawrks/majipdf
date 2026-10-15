@@ -159,9 +159,6 @@
   "excelRun": "Export {n} tables",
   "excelRun1": "Export 1 table",
   "noTables": "No tables found.",
-  "scannedTitle": "This looks like a scanned document",
-  "scannedWord": "The pages are pictures of text, so the Word file will mostly contain images you can't edit. Run Scan to text (OCR) first, then convert the result.",
-  "scannedExcel": "Pages without a text layer will come out empty. Run Scan to text (OCR) first, then convert the result.",
   "convertAnyway": "Convert anyway",
   "officeWordTitle": "Microsoft Word isn't installed on this computer",
   "officeExcelTitle": "Microsoft Excel isn't installed on this computer",
@@ -418,5 +415,15 @@
   "editWoAnnots": "{n} comments or form fields here are only partly covered and will stay in the file.",
   "setSigs": "Saved signatures & stamps",
   "setSigsCount": "{n} saved",
-  "setSigsManage": "Manage…"
+  "setSigsManage": "Manage…",
+  "ocrCardTitle": "Recognize text first (OCR)",
+  "ocrCardOnWord": "This is a scanned document. Turn its pages into real, editable text before converting. Adds about 3 seconds per page. Check names and numbers afterwards, because OCR can misread.",
+  "ocrCardOnExcel": "This is a scanned document. Read its text and table lines before converting. Adds about 3 seconds per page. Check names and numbers afterwards, because OCR can misread.",
+  "ocrCardOffWord": "Off: the Word file will mostly contain pictures of text you can't edit.",
+  "ocrCardOffExcel": "Off: scanned pages will come out empty.",
+  "ocrStage": "Recognizing text: page {n} of {total}",
+  "ocrSwitchOn": "On",
+  "ocrSwitchOff": "Off",
+  "ocrIndOn": "OCR: on",
+  "ocrIndOff": "OCR: off"
 }

@@ -18,11 +18,16 @@ pub struct WordRequest {
     path: String,
     password: Option<String>,
     out_mode: String,
+    #[serde(default)]
+    ocr: bool,
 }
 
 #[derive(Serialize, Clone)]
 pub struct WordProgress {
     stage: &'static str,
+    /// OCR stage only (0 otherwise).
+    done: u32,
+    total: u32,
 }
 
 #[derive(Serialize, Debug)]
@@ -151,10 +156,34 @@ fn convert(req: &WordRequest, out_dir: &Path, emit: &dyn Fn(&WordProgress)) -> R
 }
 
 fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&WordProgress), start: std::time::Instant) -> Result<WordResult, String> {
-    emit(&WordProgress { stage: "preparing" });
+    emit(&WordProgress { stage: "preparing", done: 0, total: 0 });
     let src = Path::new(&req.path);
     let (input, output, script): (PathBuf, PathBuf, PathBuf) = (work.join("in.pdf"), work.join("out.docx"), work.join("pdf2docx.ps1"));
-    prepare_copy(src, req.password.as_deref(), &input)?;
+    let pw = req.password.as_deref().filter(|p| !p.is_empty());
+    let mut ocr_done = false;
+    if req.ocr {
+        let last = std::cell::Cell::new((0u32, 0u32));
+        let r = crate::ocr::ocr_to(src, pw, work, &|p| {
+            if p.stage == "reading" {
+                last.set((p.done, p.total));
+            }
+            emit(&WordProgress { stage: "ocr", done: last.get().0, total: last.get().1 });
+        }, false);
+        match r {
+            Ok(o) => {
+                std::fs::rename(&o.path, &input).map_err(|e| e.to_string())?;
+                ocr_done = true;
+            }
+            Err(e) if e == "no_scan_pages" => {}
+            Err(e) => return Err(e),
+        }
+        if CANCEL.load(Ordering::SeqCst) {
+            return Err(CANCELLED.into());
+        }
+    }
+    if !ocr_done {
+        prepare_copy(src, req.password.as_deref(), &input)?;
+    }
     std::fs::write(&script, SCRIPT).map_err(|e| e.to_string())?;
     suppress_pdf_warning();
     if CANCEL.load(Ordering::SeqCst) {
@@ -196,7 +225,7 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
                     "saving" => "saving",
                     _ => continue,
                 };
-                emit(&WordProgress { stage });
+                emit(&WordProgress { stage, done: 0, total: 0 });
             }
             Line::Error(l) => error_line = Some(l),
             Line::Ok { .. } => {}
@@ -251,7 +280,7 @@ pub async fn word_convert(app: tauri::AppHandle, req: WordRequest) -> Result<Wor
 
 #[tauri::command]
 pub fn word_cancel() {
-    CANCEL.store(true, Ordering::SeqCst);
+    compress::compress_cancel(); // sets CANCEL and stops a running gs (OCR stage)
     kill_all();
 }
 
@@ -303,7 +332,7 @@ mod tests {
     }
 
     fn req(p: &Path, pw: Option<String>) -> WordRequest {
-        WordRequest { path: p.display().to_string(), password: pw, out_mode: "next".into() }
+        WordRequest { path: p.display().to_string(), password: pw, out_mode: "next".into(), ocr: false }
     }
 
     #[test]
@@ -325,6 +354,24 @@ mod tests {
         let e = convert(&req(&locked, None), &out, &|_| {}).unwrap_err();
         println!("locked without password -> {e}");
         println!("WINWORD after: {}", word_pids());
+    }
+
+    /// cargo test word_ocr_e2e -- --ignored --nocapture. Success + seconds only (samples hold real names).
+    #[test]
+    #[ignore]
+    fn word_ocr_e2e() {
+        if !samples().is_dir() || !crate::office_status().word {
+            println!("skipped: no _samples/ or no Word");
+            return;
+        }
+        let p = find("scanned_bsc");
+        let out = out_dir("majipdf_word_ocr");
+        let mut r = req(&p, None);
+        r.ocr = true;
+        let res = convert(&r, &out, &|s| println!("  stage {} {}/{}", s.stage, s.done, s.total)).unwrap();
+        println!("scanned_bsc + OCR -> size={} seconds={:.1}", res.size, res.seconds);
+        assert!(res.size > 0 && res.output.ends_with(".docx"));
+        assert!(std::fs::read_dir(&out).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("_ocr")));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! PDF -> Excel backend: own pdfium engine (default, `engine.rs`) or installed Excel Power Query via the embedded
 //! PowerShell COM script. See _docs/excel-contract.md.
-mod engine;
+pub(crate) mod engine;
 
 use crate::compress::{self, place, size_of, stamp, temp_root, CANCEL};
 use crate::pdf::{self, Opened};
@@ -25,6 +25,8 @@ pub struct ExcelRequest {
     sheet_mode: String,
     numbers: bool,
     out_mode: String,
+    #[serde(default)]
+    ocr: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -41,6 +43,8 @@ pub struct ExcelResult {
     seconds: f64,
     pages: usize,
     empty_pages: usize,
+    /// Pages where a ruled table was detected.
+    table_pages: usize,
 }
 
 // ---------- routing ----------
@@ -49,6 +53,9 @@ fn convert(req: &ExcelRequest, out_dir: &Path, emit: &dyn Fn(&ExcelProgress)) ->
     match req.engine.as_str() {
         "own" => run_in_work_dir(req, out_dir, emit, convert_own),
         "excel" => {
+            if req.ocr {
+                return Err("ocr_pq".into()); // guard only: Power Query ignores the invisible OCR text
+            }
             if !crate::office_status().excel {
                 return Err("excel_missing".into());
             }
@@ -80,8 +87,32 @@ fn stem_of(req: &ExcelRequest) -> String {
 // ---------- own engine ----------
 
 fn convert_own(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&ExcelProgress), start: std::time::Instant) -> Result<ExcelResult, String> {
-    let src = Path::new(&req.path);
-    let pw = req.password.as_deref().filter(|p| !p.is_empty());
+    let mut src = Path::new(&req.path);
+    let mut pw = req.password.as_deref().filter(|p| !p.is_empty());
+    let ocr_pdf;
+    let orig = (src, pw); // the original (rules intact) for the raster pass
+    let mut ocr_ran = false;
+    if req.ocr {
+        let last = std::cell::Cell::new((0u32, 0u32));
+        match crate::ocr::ocr_to(src, pw, work, &|p| {
+            if p.stage == "reading" || p.stage == "preparing" {
+                last.set((p.done, p.total));
+            }
+            emit(&ExcelProgress { stage: "ocr", page: last.get().0 as usize, pages: last.get().1 as usize });
+        }, true) {
+            Ok(o) => {
+                ocr_pdf = o.path;
+                src = &ocr_pdf;
+                pw = None;
+                ocr_ran = true;
+            }
+            Err(e) if e == "no_scan_pages" => {}
+            Err(e) => return Err(e),
+        }
+        if CANCEL.load(Ordering::SeqCst) {
+            return Err(CANCELLED.into());
+        }
+    }
     let output = work.join("out.xlsx");
     let opts = Options { numbers: req.numbers, sheet_mode: if req.sheet_mode == "one" { SheetMode::One } else { SheetMode::PerPage } };
     let stats = {
@@ -90,10 +121,11 @@ fn convert_own(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&E
             PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError) => "password required or wrong".to_string(),
             e => e.to_string(),
         })?;
-        engine::convert(&doc, &output, &opts, &|stage, page, pages| emit(&ExcelProgress { stage, page, pages }), &CANCEL)?
+        let orig_doc = if ocr_ran { Some(p.load_pdf_from_file(orig.0, orig.1).map_err(|e| e.to_string())?) } else { None };
+        engine::convert(&doc, orig_doc.as_ref(), &output, &opts, &|stage, page, pages| emit(&ExcelProgress { stage, page, pages }), &CANCEL)?
     };
     let dest = place(&output, out_dir, &stem_of(req), "", "xlsx")?;
-    Ok(ExcelResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), pages: stats.pages, empty_pages: stats.empty_pages })
+    Ok(ExcelResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), pages: stats.pages, empty_pages: stats.empty_pages, table_pages: stats.table_pages })
 }
 
 // ---------- Excel engine (Power Query v2 script) ----------
@@ -184,7 +216,7 @@ fn convert_excel(req: &ExcelRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(
         return Err("Excel produced no output".into());
     }
     let dest = place(&output, out_dir, &stem_of(req), "_v2", "xlsx")?;
-    Ok(ExcelResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), pages, empty_pages: 0 })
+    Ok(ExcelResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), pages, empty_pages: 0, table_pages: 0 })
 }
 
 // ---------- commands ----------
@@ -209,7 +241,7 @@ pub async fn excel_convert(app: tauri::AppHandle, req: ExcelRequest) -> Result<E
 
 #[tauri::command]
 pub fn excel_cancel() {
-    CANCEL.store(true, Ordering::SeqCst);
+    compress::compress_cancel(); // sets CANCEL and stops a running gs (OCR stage)
     kill_all();
 }
 
@@ -245,7 +277,7 @@ mod tests {
     }
 
     fn req(p: &Path, engine: &str, mode: &str, numbers: bool) -> ExcelRequest {
-        ExcelRequest { path: p.display().to_string(), password: None, engine: engine.into(), sheet_mode: mode.into(), numbers, out_mode: "next".into() }
+        ExcelRequest { path: p.display().to_string(), password: None, engine: engine.into(), sheet_mode: mode.into(), numbers, out_mode: "next".into(), ocr: false }
     }
 
     fn entries(path: &Path) -> Vec<(String, Vec<u8>)> {
@@ -325,6 +357,37 @@ mod tests {
             let r = convert(&req(&pdf, "own", "per_page", false), &out, &|_| {}).unwrap();
             println!("{:<48.48} {:>4} pages {:>4} empty  {:>7} B  {:.2}s", pdf.file_name().unwrap().to_string_lossy(), r.pages, r.empty_pages, r.size, r.seconds);
         }
+    }
+
+    /// cargo test excel_ocr_e2e -- --ignored --nocapture. Counts only: the samples hold real names and numbers.
+    #[test]
+    #[ignore]
+    fn excel_ocr_e2e() {
+        if !root().join("_samples").is_dir() {
+            println!("skipped: no _samples/");
+            return;
+        }
+        let pdf = find("scanned_bsc", "");
+        let out = out_dir("majipdf_xlsx_ocr");
+        let mut r = req(&pdf, "own", "per_page", false);
+        r.ocr = true;
+        let res = convert(&r, &out, &|p| println!("  stage {} {}/{}", p.stage, p.page, p.pages)).unwrap();
+        println!("scanned_bsc + OCR: {:.1}s, {} pages, {} with a table", res.seconds, res.pages, res.table_pages);
+        let e = entries(Path::new(&res.output));
+        let sst: Vec<String> = e.iter().find(|x| x.0 == "xl/sharedStrings.xml").map(|x| String::from_utf8_lossy(&x.1).split("<si>").skip(1).map(String::from).collect()).unwrap_or_default();
+        for i in 1..=res.pages {
+            let s = String::from_utf8_lossy(&e.iter().find(|x| x.0 == format!("xl/worksheets/sheet{i}.xml")).unwrap().1).to_string();
+            let merges = s.matches("<mergeCell ").count();
+            let cells = s.split("<c ").skip(1).filter(|c| c.split("</c>").next().is_some_and(|c| c.contains("<v>") || c.contains("<is>"))).count();
+            // cells whose shared string contains a bar (counts only, never the text)
+            let bars = s.split("<c ").skip(1).filter(|c| c.contains("t=\"s\"")).filter_map(|c| c.split("<v>").nth(1)?.split("</v>").next()?.parse::<usize>().ok()).filter(|&k| sst.get(k).is_some_and(|t| t.contains('|'))).count();
+            println!("  page {i}: merges={merges} non-empty cells={cells} cells with a bar={bars}");
+        }
+        assert!(res.table_pages >= 1, "no page built a table");
+        // PQ engine + OCR is rejected
+        let mut q = req(&pdf, "excel", "per_page", false);
+        q.ocr = true;
+        assert_eq!(convert(&q, &out, &|_| {}).unwrap_err(), "ocr_pq");
     }
 
     #[test]

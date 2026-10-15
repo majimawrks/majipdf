@@ -159,9 +159,6 @@
   "excelRun": "Ekspor {n} tabel",
   "excelRun1": "Ekspor 1 tabel",
   "noTables": "Tidak ada tabel yang ditemukan.",
-  "scannedTitle": "Ini tampaknya dokumen hasil pindaian",
-  "scannedWord": "Halamannya berupa gambar teks, jadi file Word sebagian besar berisi gambar yang tidak bisa disunting. Jalankan Pindai ke teks (OCR) terlebih dahulu, lalu konversi hasilnya.",
-  "scannedExcel": "Halaman tanpa lapisan teks akan kosong. Jalankan Pindai ke teks (OCR) terlebih dahulu, lalu konversi hasilnya.",
   "convertAnyway": "Tetap ubah",
   "officeWordTitle": "Microsoft Word belum terpasang di komputer ini",
   "officeExcelTitle": "Microsoft Excel belum terpasang di komputer ini",
@@ -418,5 +415,15 @@
   "editWoAnnots": "{n} komentar atau isian formulir di sini hanya tertutup sebagian dan tetap ada di file.",
   "setSigs": "Tanda tangan & stempel tersimpan",
   "setSigsCount": "{n} tersimpan",
-  "setSigsManage": "Kelola…"
+  "setSigsManage": "Kelola…",
+  "ocrCardTitle": "Kenali teks terlebih dahulu (OCR)",
+  "ocrCardOnWord": "Ini dokumen hasil pindaian. Ubah halamannya menjadi teks asli yang bisa disunting sebelum dikonversi. Menambah sekitar 3 detik per halaman. Periksa nama dan angka setelahnya, karena OCR bisa salah baca.",
+  "ocrCardOnExcel": "Ini dokumen hasil pindaian. Baca teks dan garis tabelnya sebelum dikonversi. Menambah sekitar 3 detik per halaman. Periksa nama dan angka setelahnya, karena OCR bisa salah baca.",
+  "ocrCardOffWord": "Nonaktif: file Word sebagian besar berisi gambar teks yang tidak bisa disunting.",
+  "ocrCardOffExcel": "Nonaktif: halaman pindaian akan kosong.",
+  "ocrStage": "Mengenali teks: halaman {n} dari {total}",
+  "ocrSwitchOn": "Aktif",
+  "ocrSwitchOff": "Nonaktif",
+  "ocrIndOn": "OCR: aktif",
+  "ocrIndOff": "OCR: nonaktif"
 }

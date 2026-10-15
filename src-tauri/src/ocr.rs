@@ -1,8 +1,9 @@
 //! Scan to text (OCR) backend: Ghostscript `pdfocr24` (Tesseract) on the scan pages only. See _docs/ocr-contract.md.
 use crate::compress::{self, place, run_gs, size_of, stamp, temp_root, GsErr, CANCEL};
 use crate::pdf::{self, Opened};
+use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tauri::Emitter;
 
@@ -17,9 +18,9 @@ pub struct OcrRequest {
 
 #[derive(Serialize, Clone)]
 pub struct OcrProgress {
-    stage: &'static str,
-    done: u32,
-    total: u32,
+    pub(crate) stage: &'static str,
+    pub(crate) done: u32,
+    pub(crate) total: u32,
 }
 
 #[derive(Serialize, Debug)]
@@ -57,8 +58,32 @@ fn ocr(req: &OcrRequest, out_dir: &Path, emit: &dyn Fn(&OcrProgress)) -> Result<
 
 fn ocr_in(req: &OcrRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&OcrProgress), start: std::time::Instant) -> Result<OcrResult, String> {
     let src = Path::new(&req.path);
-    let pw = req.password.as_deref().filter(|p| !p.is_empty());
-    emit(&OcrProgress { stage: "preparing", done: 0, total: 0 });
+    let o = ocr_to(src, req.password.as_deref().filter(|p| !p.is_empty()), work, &|p| emit(&p), false)?;
+    // Commit point: past this check the output is published and returned, never reported as cancelled.
+    check_cancel()?;
+    if size_of(&o.path) == 0 {
+        return Err("OCR produced no output".into());
+    }
+    let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "output".into());
+    let dest = place(&o.path, out_dir, &stem, "_ocr", "pdf")?;
+    Ok(OcrResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), ocr_pages: o.ocr_pages, pages: o.pages })
+}
+
+/// Result of [`ocr_to`]: the unencrypted OCR'd copy inside the caller's work dir.
+pub(crate) struct OcrOut {
+    pub path: PathBuf,
+    pub ocr_pages: u32,
+    pub pages: u32,
+}
+
+/// OCRs the scan pages of `src` and writes the whole document to `work/ocr_out.pdf` (unencrypted). Used by
+/// the OCR tool and by Word/Excel. No `place()`, no job guard and no CANCEL reset: the caller owns those.
+/// `clean` (Excel): the scan pages are rendered at 300 DPI and have their table rules erased before Tesseract sees
+/// them (it reads rules as "|"); the OCR text layer is then spliced from the raw OCR output (no ebook pass).
+/// `Err("no_scan_pages")` when nothing qualifies.
+pub(crate) fn ocr_to(src: &Path, password: Option<&str>, work: &Path, emit: &dyn Fn(OcrProgress), clean: bool) -> Result<OcrOut, String> {
+    let pw = password;
+    emit(OcrProgress { stage: "preparing", done: 0, total: 0 });
     match pdf::open(src, pw) {
         Opened::Ok { .. } => {}
         Opened::NeedsPassword => return Err("password required or wrong".into()),
@@ -66,7 +91,7 @@ fn ocr_in(req: &OcrRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&OcrProgr
     }
 
     // 1-3: classify every page, write the scan pages into an unencrypted scan.pdf
-    let (scan_pdf, ocr_pdf, small_pdf, tmp) = (work.join("scan.pdf"), work.join("ocr.pdf"), work.join("ocr_small.pdf"), work.join("out.pdf"));
+    let (scan_pdf, ocr_pdf, small_pdf, tmp) = (work.join("scan.pdf"), work.join("ocr.pdf"), work.join("ocr_small.pdf"), work.join("ocr_out.pdf"));
     let (scan, pages) = {
         let p = pdf::pdfium()?;
         let doc = p.load_pdf_from_file(src, pw).map_err(|e| e.to_string())?;
@@ -76,7 +101,31 @@ fn ocr_in(req: &OcrRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&OcrProgr
         }
         let mut out = p.create_new_pdf().map_err(|e| e.to_string())?;
         for (k, &i) in scan.iter().enumerate() {
-            out.pages_mut().copy_page_range_from_document(&doc, i..=i, k as i32).map_err(|e| e.to_string())?;
+            if !clean {
+                out.pages_mut().copy_page_range_from_document(&doc, i..=i, k as i32).map_err(|e| e.to_string())?;
+                continue;
+            }
+            check_cancel()?;
+            emit(OcrProgress { stage: "preparing", done: k as u32, total: scan.len() as u32 });
+            let page = doc.pages().get(i).map_err(|e| e.to_string())?;
+            let (pw_pt, ph_pt) = (page.width(), page.height());
+            // 300 DPI, capped at ~40 MP so an A0 scan doesn't take gigabytes
+            let dpi = 300f32.min((40e6 / (pw_pt.value / 72.0 * ph_pt.value / 72.0).max(1.0)).sqrt());
+            let cfg = PdfRenderConfig::new().set_target_width((pw_pt.value * dpi / 72.0) as i32);
+            let Some(mut gray) = page.render_with_config(&cfg).ok().and_then(|b| b.as_image().ok()).map(|i| i.to_luma8()) else {
+                // can't render this page: OCR it as it is
+                out.pages_mut().copy_page_range_from_document(&doc, i..=i, k as i32).map_err(|e| e.to_string())?;
+                continue;
+            };
+            let (w, h) = (gray.width() as usize, gray.height() as usize);
+            crate::excel::engine::clean_for_ocr(&mut gray, w, h, dpi);
+            let mut pg = out.pages_mut().create_page_at_end(PdfPagePaperSize::new_custom(pw_pt, ph_pt)).map_err(|e| e.to_string())?;
+            pg.objects_mut()
+                .create_image_object(PdfPoints::ZERO, PdfPoints::ZERO, &image::DynamicImage::ImageLuma8(gray), Some(pw_pt), Some(ph_pt))
+                .map_err(|e| e.to_string())?;
+        }
+        if clean {
+            emit(OcrProgress { stage: "preparing", done: scan.len() as u32, total: scan.len() as u32 });
         }
         out.save_to_file(&scan_pdf).map_err(|e| e.to_string())?;
         (scan, doc.pages().len() as u32)
@@ -85,15 +134,18 @@ fn ocr_in(req: &OcrRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&OcrProgr
     check_cancel()?;
 
     // 4: OCR (progress from gs "Page N" lines)
-    emit(&OcrProgress { stage: "reading", done: 0, total });
+    emit(OcrProgress { stage: "reading", done: 0, total });
     let mut args: Vec<String> = ["-dNOPAUSE", "-dBATCH", "-sDEVICE=pdfocr24", "-r300", "-sOCRLanguage=ind+eng"].map(String::from).into();
     args.push(format!("-sOutputFile={}", ocr_pdf.display()));
     args.push(scan_pdf.display().to_string());
-    run_gs(&args, |n| emit(&OcrProgress { stage: "reading", done: n.min(total), total })).map_err(gs_err)?;
+    run_gs(&args, |n| emit(OcrProgress { stage: "reading", done: n.min(total), total })).map_err(gs_err)?;
 
     // 5: Balanced pass (the invisible text survives)
-    emit(&OcrProgress { stage: "saving", done: total, total });
-    run_gs(&compress::gs_args("ebook", 150, false, None, &ocr_pdf, &small_pdf), |_| {}).map_err(gs_err)?;
+    emit(OcrProgress { stage: "saving", done: total, total });
+    if !clean {
+        run_gs(&compress::gs_args("ebook", 150, false, None, &ocr_pdf, &small_pdf), |_| {}).map_err(gs_err)?;
+    }
+    let small_pdf = if clean { ocr_pdf } else { small_pdf };
 
     // 6: original page order, scan pages from the OCR'd copy, the rest untouched
     {
@@ -114,14 +166,7 @@ fn ocr_in(req: &OcrRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&OcrProgr
         }
         out.save_to_file(&tmp).map_err(|e| e.to_string())?;
     }
-    // Commit point: past this check the output is published and returned, never reported as cancelled.
-    check_cancel()?;
-    if size_of(&tmp) == 0 {
-        return Err("OCR produced no output".into());
-    }
-    let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "output".into());
-    let dest = place(&tmp, out_dir, &stem, "_ocr", "pdf")?;
-    Ok(OcrResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), ocr_pages: total, pages })
+    Ok(OcrOut { path: tmp, ocr_pages: total, pages })
 }
 
 // ---------- commands ----------

@@ -13,6 +13,7 @@
   import DoneCard from "./DoneCard.svelte";
   import ErrorCard from "./ErrorCard.svelte";
   import Thumb from "./Thumb.svelte";
+  import OcrCard from "./OcrCard.svelte";
 
   const run = app.excel.run;
   const x = app.excel;
@@ -27,6 +28,10 @@
   const pw = $derived(file ? (app.compress.passwords[file.path] ?? null) : null);
   const pages = $derived(file?.pages ?? 0);
   const scanned = $derived(!!file?.scanned);
+  $effect(() => {
+    file?.path;
+    x.ocr = true; // new file: OCR back on
+  });
 
   // 1 Hz tick drives the estimate while running.
   let now = $state(Date.now());
@@ -41,6 +46,7 @@
   const own = $derived(run.engine === "own");
   const percent2 = $derived(run.progress && run.progress.pages ? Math.floor((run.progress.page / run.progress.pages) * 100) : 0);
   const status = $derived.by(() => {
+    if (run.progress?.stage === "ocr") return t("ocrStage", { n: run.progress.page, total: run.progress.pages });
     if (own) return run.progress?.pages ? t("xlsPageOf", { a: run.progress.page, b: run.progress.pages }) : t("wordStagePrep");
     const st = t("xlsStageExcel");
     const left = est - elapsed;
@@ -55,7 +61,7 @@
 </script>
 
 {#if app.tool.phase === "running"}
-  <ProcessingCard name={run.name} percent={own ? percent2 : percent} {status} oncancel={cancelRun} extra={own ? undefined : t("xlsBgNote")} />
+  <ProcessingCard name={run.name} percent={own || run.progress?.stage === "ocr" ? percent2 : percent} {status} oncancel={cancelRun} extra={own ? undefined : t("xlsBgNote")} />
 {:else if app.tool.phase === "done" && run.result}
   {@const res = run.v2 ?? run.result}
   <DoneCard
@@ -65,7 +71,7 @@
     icon="file-xls"
     onanother={processAnother}
     extra={res.empty_pages > 0 ? emptyNote : undefined}
-    after={!run.v2 && app.office.excel ? other : undefined}
+    after={!run.v2 && app.office.excel && !run.usedOcr ? other : undefined}
   />
 {:else if app.tool.phase === "error" || file?.damaged}
   {#if file?.damaged}
@@ -95,13 +101,7 @@
 {#snippet main()}
   {#if file}
     {#if scanned && !locked}
-      <div role="note" style="display:flex;gap:12px;padding:14px 16px;border-radius:14px;background:var(--warn-soft);color:var(--warn)">
-        <i class="ph ph-warning" style="font-size:22px;flex-shrink:0;margin-top:1px"></i>
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <div style="font-weight:700">{t("scannedTitle")}</div>
-          <div style="font-size:14px">{t("scannedExcel")}</div>
-        </div>
-      </div>
+      <OcrCard on={x.ocr} kind="Excel" onchange={(v) => (x.ocr = v)} />
     {/if}
     <div style="display:flex;align-items:center;gap:14px">
       {#if locked}

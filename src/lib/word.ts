@@ -23,14 +23,22 @@ export async function startRun() {
   r.pages = f.pages ?? 0;
   r.startedAt = Date.now();
   r.progress = null;
+  r.ocrStarted = false;
+  const ocr = w.ocr && !!f.scanned;
   r.result = null;
   r.error = "";
   app.tool.phase = "running";
   const unlisten = await api.onWordProgress((p) => {
-    if (id === runId) r.progress = p;
+    if (id !== runId) return;
+    if (p.stage === "ocr") r.ocrStarted = true;
+    else if (r.ocrStarted) {
+      r.ocrStarted = false;
+      r.startedAt = Date.now(); // conversion estimate restarts after OCR
+    }
+    r.progress = p;
   });
   try {
-    const res = await api.wordConvert({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode });
+    const res = await api.wordConvert({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode, ocr });
     if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;

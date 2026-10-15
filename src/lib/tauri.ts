@@ -338,6 +338,13 @@ async function mockWord(req: WordRequest): Promise<WordResult> {
   mockWordCancel = false;
   const stages: WordProgress["stage"][] = ["preparing", "converting", "saving"];
   const t0 = Date.now();
+  if (req.ocr) {
+    for (let i = 0; i <= 6; i++) {
+      wordListeners.forEach((l) => l({ stage: "ocr", done: i, total: 6 }));
+      await sleep(500);
+      if (mockWordCancel) throw "cancelled";
+    }
+  }
   for (const [i, stage] of stages.entries()) {
     wordListeners.forEach((l) => l({ stage }));
     await sleep(i === 1 ? 2000 : 1000);
@@ -427,6 +434,13 @@ async function mockExcel(req: ExcelRequest): Promise<ExcelResult> {
   const pages = mockDb().find((f) => f.path === req.path)?.pages ?? 7;
   const t0 = Date.now();
   const emit = (p: ExcelProgress) => excelListeners.forEach((l) => l(p));
+  if (req.ocr) {
+    for (let i = 0; i <= 6; i++) {
+      emit({ stage: "ocr", page: i, pages: 6 });
+      await sleep(500);
+      if (mockExcelCancel) throw "cancelled";
+    }
+  }
   if (req.engine === "own") {
     const steps = 10;
     for (let s = 1; s <= steps; s++) {

@@ -24,6 +24,8 @@ pub struct Stats {
     pub pages: usize,
     /// Pages without a text layer (pure scans): their sheet stays empty.
     pub empty_pages: usize,
+    /// Pages where a ruled table was detected.
+    pub table_pages: usize,
 }
 
 // ---------- pdf2xlsx ("engine b"), iteration 3: ruling-line lattice tables +
@@ -286,6 +288,307 @@ fn page_path_segments(page: &PdfPage, page_h: f64) -> (Vec<Seg>, Vec<Seg>) {
     (horiz_raw, vert_raw)
 }
 
+const RASTER_DPI: f32 = 150.0;
+/// Max thickness (pt) of a ruling line found in a raster. Scan rules are 0.5-1.5 pt; small text (x-height ~4 pt)
+/// must stay above it, or a line of text reads as a rule (and `clean_for_ocr` erases it).
+const RULE_THIN_PT: f64 = 2.0;
+
+/// Renders a scan page at 150 DPI grayscale (invisible Tr 3 OCR text doesn't render) and finds its ruling
+/// lines plus the page skew (see `raster_rules`). Empty on any render failure (today's behaviour: no table).
+fn raster_page_rules(page: &PdfPage, page_w: f64, page_h: f64) -> (Vec<Seg>, Vec<Seg>, f64) {
+    let px = |pt: f64| (pt * RASTER_DPI as f64 / 72.0).round().max(1.0) as i32;
+    let cfg = PdfRenderConfig::new().set_target_width(px(page_w)).set_maximum_height(px(page_h));
+    let Ok(bmp) = page.render_with_config(&cfg) else { return (Vec::new(), Vec::new(), 0.0) };
+    let Ok(img) = bmp.as_image() else { return (Vec::new(), Vec::new(), 0.0) };
+    let gray = img.to_luma8();
+    raster_rules(gray.as_raw(), gray.width() as usize, gray.height() as usize, RASTER_DPI)
+}
+
+/// A group of runs: bbox (`o` = across the line, `a..=b` = along it) plus run-length-weighted sums of the run
+/// centres, for the mean position and a least-squares slope (d across / d along).
+#[derive(Clone)]
+struct Comp {
+    o0: usize,
+    o1: usize,
+    a: usize,
+    b: usize,
+    sw: f64,
+    si: f64,
+    so: f64,
+    sii: f64,
+    sio: f64,
+    /// member runs `(o, a, b)` (for erasing the rule from the bitmap)
+    runs: Vec<(usize, usize, usize)>,
+}
+
+impl Comp {
+    fn slope(&self) -> f64 {
+        let d = self.sw * self.sii - self.si * self.si;
+        if d.abs() < 1e-9 { 0.0 } else { (self.sw * self.sio - self.si * self.so) / d }
+    }
+}
+
+/// Dark runs (bridging gaps <= 5 px, >= 20 px long) per line of `dark` (`outer` lines of `inner` px), grouped across
+/// adjacent lines (+-1, touching ranges) into components. Run-length passes plus a union-find over neighbouring runs
+/// only: linear in the pixel count.
+fn raster_components(dark: &[bool], outer: usize, inner: usize) -> Vec<Comp> {
+    struct Run {
+        o: usize,
+        a: usize,
+        b: usize,
+    }
+    let mut runs: Vec<Run> = Vec::new();
+    let mut parent: Vec<usize> = Vec::new();
+    fn root(p: &mut [usize], mut i: usize) -> usize {
+        while p[i] != i {
+            p[i] = p[p[i]];
+            i = p[i];
+        }
+        i
+    }
+    let (mut prev_lo, mut prev_hi) = (0usize, 0usize); // runs of the previous line: prev_lo..prev_hi
+    for o in 0..outer {
+        let line = &dark[o * inner..(o + 1) * inner];
+        let start = runs.len();
+        let mut i = 0;
+        while i < inner {
+            if !line[i] {
+                i += 1;
+                continue;
+            }
+            let (a, mut bb) = (i, i);
+            i += 1;
+            while i < inner && i - bb <= 6 {
+                if line[i] {
+                    bb = i;
+                }
+                i += 1;
+            }
+            if bb - a + 1 >= 20 {
+                runs.push(Run { o, a, b: bb });
+            }
+        }
+        let n = runs.len();
+        parent.extend(start..n);
+        let mut p0 = prev_lo;
+        for r in start..n {
+            while p0 < prev_hi && runs[p0].b + 1 < runs[r].a {
+                p0 += 1;
+            }
+            let mut p = p0;
+            while p < prev_hi && runs[p].a <= runs[r].b + 1 {
+                let (x, y) = (root(&mut parent, r), root(&mut parent, p));
+                parent[x] = y;
+                p += 1;
+            }
+        }
+        (prev_lo, prev_hi) = (start, n);
+    }
+    let mut comps: HashMap<usize, Comp> = HashMap::new();
+    for i in 0..runs.len() {
+        let r = root(&mut parent, i);
+        let (o, a, b) = (runs[i].o, runs[i].a, runs[i].b);
+        let (wt, c, of) = ((b + 1 - a) as f64, (a + b) as f64 / 2.0, o as f64);
+        let e = comps.entry(r).or_insert(Comp { o0: o, o1: o, a, b, sw: 0.0, si: 0.0, so: 0.0, sii: 0.0, sio: 0.0, runs: Vec::new() });
+        e.runs.push((o, a, b));
+        (e.o0, e.o1, e.a, e.b) = (e.o0.min(o), e.o1.max(o), e.a.min(a), e.b.max(b));
+        e.sw += wt;
+        e.si += wt * c;
+        e.so += wt * of;
+        e.sii += wt * c * c;
+        e.sio += wt * c * of;
+    }
+    comps.into_values().collect()
+}
+
+/// Rule components of a grayscale bitmap: (horizontal, vertical) runs groups that pass the rule test described
+/// at [`raster_rules`].
+fn rule_comps(gray: &[u8], w: usize, h: usize, dpi: f32) -> (Vec<Comp>, Vec<Comp>) {
+    let k = 72.0 / dpi as f64;
+    let thin = (RULE_THIN_PT / k).ceil() as usize;
+    let d = thin + 1;
+    let g = |x: usize, y: usize| gray[y * w + x] as i32;
+    let mut hm = vec![false; w * h]; // row-major: horizontal-rule candidates
+    let mut vm_t = vec![false; w * h]; // column-major: vertical-rule candidates
+    for y in 0..h {
+        for x in 0..w {
+            let v = g(x, y);
+            if v >= 200 {
+                continue;
+            }
+            let up = if y >= d { g(x, y - d) } else { 255 };
+            let dn = if y + d < h { g(x, y + d) } else { 255 };
+            hm[y * w + x] = up.min(dn) - v >= 60;
+            let l = if x >= d { g(x - d, y) } else { 255 };
+            let r = if x + d < w { g(x + d, y) } else { 255 };
+            vm_t[x * h + y] = l.min(r) - v >= 60;
+        }
+    }
+    let keep_thin = |m: &mut [bool], outer: usize, inner: usize| {
+        for o in 0..outer {
+            let line = &mut m[o * inner..(o + 1) * inner];
+            let mut i = 0;
+            while i < inner {
+                if !line[i] {
+                    i += 1;
+                    continue;
+                }
+                let a = i;
+                while i < inner && line[i] {
+                    i += 1;
+                }
+                if i - a > thin {
+                    line[a..i].fill(false);
+                }
+            }
+        }
+    };
+    let mut t = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            t[x * h + y] = hm[y * w + x];
+        }
+    }
+    keep_thin(&mut t, w, h); // per column: drop vertically thick candidates
+    let mut vm = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            hm[y * w + x] = t[x * h + y];
+            vm[y * w + x] = vm_t[x * h + y];
+        }
+    }
+    keep_thin(&mut vm, h, w); // per row: drop horizontally thick candidates
+    for y in 0..h {
+        for x in 0..w {
+            vm_t[x * h + y] = vm[y * w + x];
+        }
+    }
+
+    let is_rule = |c: &Comp, min_len_pt: f64| {
+        let len = (c.b + 1 - c.a) as f64 * k;
+        // bbox allows ~1 degree of skew; the mean thickness (run pixels / length) keeps a line of small text out
+        len >= min_len_pt && ((c.o1 + 1 - c.o0) as f64 * k) <= (len * 0.02).max(4.0) && c.sw / (c.b + 1 - c.a) as f64 * k <= RULE_THIN_PT
+    };
+    let hc: Vec<Comp> = raster_components(&hm, h, w).into_iter().filter(|c| is_rule(c, 72.0)).collect();
+    let vc: Vec<Comp> = raster_components(&vm_t, w, h).into_iter().filter(|c| is_rule(c, 24.0)).collect();
+    (hc, vc)
+}
+
+/// Prepares a scan page for Tesseract, which reads table rules as "|" / "[" and garbles the text touching them:
+/// erases the ruling lines found by [`rule_comps`] (plus a 1 px halo) and turns light greys (header fills, paper
+/// tone) white.
+pub(crate) fn clean_for_ocr(gray: &mut [u8], w: usize, h: usize, dpi: f32) {
+    if w == 0 || h == 0 || gray.len() < w * h {
+        return;
+    }
+    let (hc, vc) = rule_comps(gray, w, h, dpi);
+    for &(o, a, b) in hc.iter().flat_map(|c| &c.runs) {
+        for y in o.saturating_sub(1)..=(o + 1).min(h - 1) {
+            gray[y * w + a..=y * w + b].fill(255);
+        }
+    }
+    for &(o, a, b) in vc.iter().flat_map(|c| &c.runs) {
+        for x in o.saturating_sub(1)..=(o + 1).min(w - 1) {
+            for y in a..=b {
+                gray[y * w + x] = 255;
+            }
+        }
+    }
+    for p in gray.iter_mut() {
+        if *p > 160 {
+            *p = 255;
+        }
+    }
+}
+
+/// Ruling lines of a grayscale bitmap (`w`x`h`, `dpi`): (horizontal, vertical) segments in pt, top-down origin,
+/// **deskewed** about the page centre, plus the page skew `s` (dy/dx of the horizontal rules). Callers rotate
+/// the page's text the same way: x' = x + s*(y - cy), y' = y - s*(x - cx).
+/// - A pixel is a horizontal-rule candidate when it is clearly darker (by 60) than the pixels `THIN_PT` above and
+///   below (vertical rules: left and right). That keeps a rule inside a grey header fill, bridges the grey
+///   half-pixels where a skewed scan line steps one row, and ignores flat fills.
+/// - Candidates whose dark run across the rule is longer than `THIN_PT` are dropped: glyph stems touching a rule,
+///   crossing rules and filled bands don't fuse into the rule's component (that shifted or rejected it).
+/// - A component is a rule when long (>= 72 pt across, >= 24 pt down) and thin (bbox <= max(4 pt, length * 0.02),
+///   ~1 degree of skew). Same-line pieces with gaps <= 8 pt are joined. `thickness` is always 0.5. Rules within
+///   1.5 % of the page edge (scanner border shadows) are dropped.
+fn raster_rules(gray: &[u8], w: usize, h: usize, dpi: f32) -> (Vec<Seg>, Vec<Seg>, f64) {
+    if w == 0 || h == 0 || gray.len() < w * h {
+        return (Vec::new(), Vec::new(), 0.0);
+    }
+    let k = 72.0 / dpi as f64;
+    let (hc, vc) = rule_comps(gray, w, h, dpi);
+
+    // Page skew: length-weighted median slope (a vertical rule's dx/dy is -s).
+    let mut slopes: Vec<(f64, f64)> = hc.iter().map(|c| (c.slope(), c.sw)).chain(vc.iter().map(|c| (-c.slope(), c.sw))).collect();
+    slopes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let half = slopes.iter().map(|s| s.1).sum::<f64>() / 2.0;
+    let mut acc = 0.0;
+    let s = slopes
+        .iter()
+        .find(|e| {
+            acc += e.1;
+            acc >= half
+        })
+        .map_or(0.0, |e| e.0)
+        .clamp(-0.035, 0.035); // ~2 degrees
+    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+
+    let finish = |mut segs: Vec<Seg>, page_len_pt: f64| -> Vec<Seg> {
+        let edge = 0.015 * page_len_pt;
+        segs.retain(|s| s.pos > edge && s.pos < page_len_pt - edge);
+        segs.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap().then(a.lo.partial_cmp(&b.lo).unwrap()));
+        let mut out: Vec<Seg> = Vec::new();
+        for sg in segs {
+            match out.iter_mut().rev().find(|o| (o.pos - sg.pos).abs() <= LINE_TOL && sg.lo <= o.hi + 8.0 && sg.hi >= o.lo - 8.0) {
+                Some(o) => {
+                    (o.lo, o.hi) = (o.lo.min(sg.lo), o.hi.max(sg.hi));
+                }
+                None => out.push(sg),
+            }
+        }
+        out
+    };
+    let horiz = hc
+        .iter()
+        .map(|c| {
+            let (xm, ym) = (c.si / c.sw, c.so / c.sw);
+            let dx = s * (ym - cy);
+            Seg { pos: (ym - s * (xm - cx)) * k, lo: (c.a as f64 + dx) * k, hi: (c.b as f64 + 1.0 + dx) * k, thickness: 0.5 }
+        })
+        .collect();
+    let vert = vc
+        .iter()
+        .map(|c| {
+            let (ym, xm) = (c.si / c.sw, c.so / c.sw);
+            let dy = -s * (xm - cx);
+            Seg { pos: (xm + s * (ym - cy)) * k, lo: (c.a as f64 + dy) * k, hi: (c.b as f64 + 1.0 + dy) * k, thickness: 0.5 }
+        })
+        .collect();
+    let (mut horiz, mut vert) = (finish(horiz, h as f64 * k), finish(vert, w as f64 * k));
+    // A table edge drawn as a filled band (a dark total row) is no rule, so the rules crossing it just stop
+    // there. >= 3 rules ending at one position with no crossing rule there: add that edge.
+    let close = |ends: &[Seg], cross: &[Seg]| -> Vec<Seg> {
+        let mut out = Vec::new();
+        for at in [|s: &Seg| s.lo, |s: &Seg| s.hi] {
+            let mut e: Vec<(f64, f64)> = ends.iter().map(|s| (at(s), s.pos)).collect();
+            e.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            for g in e.chunk_by(|a, b| b.0 - a.0 <= LINE_TOL) {
+                let pos = g.iter().map(|x| x.0).sum::<f64>() / g.len() as f64;
+                let (lo, hi) = g.iter().fold((f64::MAX, f64::MIN), |(l, r), x| (l.min(x.1), r.max(x.1)));
+                if g.len() >= 3 && !cross.iter().any(|c| (c.pos - pos).abs() <= LINE_TOL && c.hi.min(hi) - c.lo.max(lo) >= 0.8 * (hi - lo)) {
+                    out.push(Seg { pos, lo, hi, thickness: 0.5 });
+                }
+            }
+        }
+        out
+    };
+    let (add_h, add_v) = (close(&vert, &horiz), close(&horiz, &vert));
+    horiz.extend(add_h);
+    vert.extend(add_v);
+    (horiz, vert, s)
+}
+
 /// Detects a lattice table from merged ruling-line segments. Returns the table plus the merged
 /// horizontal/vertical segments (reused later to draw cell borders).
 /// ponytail: page-wide single table, not clustered into separate regions. Upgrade path if a
@@ -335,7 +638,9 @@ fn detect_table(horiz_raw: Vec<Seg>, vert_raw: Vec<Seg>) -> Option<(Table, Vec<S
 
 /// Builds words from page chars: cluster into lines by vertical center, then within each line
 /// join chars whose gap is small (< 0.25 * line height) and split on real whitespace.
-fn build_words(page: &PdfPage, page_h: f64) -> Vec<Word> {
+/// `scan`: the OCR text layer has zero-width generated spaces that land on a row of their own, so on scan pages
+/// a space marks a word break on the char before it instead of being a char itself.
+fn build_words(page: &PdfPage, page_h: f64, scan: bool) -> Vec<Word> {
     struct Ch {
         ch: char,
         left: f64,
@@ -345,12 +650,19 @@ fn build_words(page: &PdfPage, page_h: f64) -> Vec<Word> {
         font_size: f64,
         bold: bool,
         font_name: String,
+        break_after: bool,
     }
 
-    let mut chars = Vec::new();
+    let mut chars = Vec::<Ch>::new();
     if let Ok(text) = page.text() {
         for c in text.chars().iter() {
             let Some(ch) = c.unicode_char() else { continue };
+            if scan && ch.is_whitespace() {
+                if let Some(p) = chars.last_mut() {
+                    p.break_after = true;
+                }
+                continue;
+            }
             let Ok(b) = c.loose_bounds() else { continue };
             let font_size = c.scaled_font_size().value as f64;
             let font_name = c.font_name();
@@ -364,8 +676,30 @@ fn build_words(page: &PdfPage, page_h: f64) -> Vec<Word> {
                 font_size,
                 bold,
                 font_name,
+                break_after: false,
             });
         }
+    }
+    if scan {
+        // Tesseract sometimes emits the same cell text twice as overlapping lines; positional word assembly then
+        // interleaves them ("Inndddeekk"). Drop a char that overlaps the same char (case-insensitive) by > 50 %;
+        // only same-char twins, so OCR noise overlapping real text (a signature over a name) never removes the text.
+        // ponytail: O(n^2) per page; fine for a few thousand chars, bucket by row if pages get denser.
+        let area = |c: &Ch| ((c.right - c.left) * (c.bottom - c.top)).max(1e-6);
+        let mut kept: Vec<Ch> = Vec::with_capacity(chars.len());
+        for c in chars {
+            let dup = kept.iter().any(|k| {
+                if !k.ch.to_lowercase().eq(c.ch.to_lowercase()) {
+                    return false;
+                }
+                let ov = (k.right.min(c.right) - k.left.max(c.left)).max(0.0) * (k.bottom.min(c.bottom) - k.top.max(c.top)).max(0.0);
+                ov > 0.5 * area(k).min(area(&c))
+            });
+            if !dup {
+                kept.push(c);
+            }
+        }
+        chars = kept;
     }
     if chars.is_empty() {
         return Vec::new();
@@ -492,6 +826,13 @@ fn build_words(page: &PdfPage, page_h: f64) -> Vec<Word> {
             cur_top = cur_top.min(c.top);
             cur_bottom = cur_bottom.max(c.bottom);
             prev_right = Some(c.right);
+            if c.break_after {
+                flush(
+                    &mut cur, cur_left, cur_right, cur_top, cur_bottom, cur_font_size, cur_bold,
+                    &cur_font_name, &mut words,
+                );
+                prev_right = None;
+            }
         }
         flush(
             &mut cur, cur_left, cur_right, cur_top, cur_bottom, cur_font_size, cur_bold,
@@ -874,12 +1215,15 @@ struct PageOut {
     /// Column widths (Excel units), index = worksheet column.
     widths: Vec<f64>,
     setup: PageSetup,
+    /// A ruled table was detected on this page.
+    table: bool,
 }
 
 /// Converts `doc` into `out`. `progress(stage, page, pages)` is called per page ("reading") and once
 /// before the save ("writing"); `cancel` is polled per page and answers `Err(CANCELLED)`.
 pub fn convert(
     doc: &PdfDocument,
+    rules_from: Option<&PdfDocument>,
     out: &Path,
     opts: &Options,
     progress: &dyn Fn(&'static str, usize, usize),
@@ -889,6 +1233,7 @@ pub fn convert(
     let mut fc = FormatCache::new();
     let pages = doc.pages().len() as usize;
     let mut empty_pages = 0usize;
+    let mut table_pages = 0usize;
 
     // sheet_mode "one": all pages stacked on the single sheet "Pages".
     let mut one_sheet = (opts.sheet_mode == SheetMode::One).then(|| {
@@ -911,9 +1256,10 @@ pub fn convert(
             None => {
                 let worksheet = workbook.add_worksheet();
                 worksheet.set_name(format!("Page{}", page_idx + 1)).ok();
-                match write_page(doc, &page, worksheet, 0, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
+                match write_page(doc, rules_from.and_then(|d| d.pages().get(page_idx as i32).ok()), &page, worksheet, 0, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
                     None => empty_pages += 1,
                     Some(p) => {
+                        table_pages += p.table as usize;
                         for (c, w) in p.widths.iter().enumerate() {
                             worksheet.set_column_width(c as u16, *w).ok();
                         }
@@ -926,9 +1272,10 @@ pub fn convert(
                     }
                 }
             }
-            Some(worksheet) => match write_page(doc, &page, worksheet, next_row, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
+            Some(worksheet) => match write_page(doc, rules_from.and_then(|d| d.pages().get(page_idx as i32).ok()), &page, worksheet, next_row, &mut fc, opts.numbers).map_err(|e| format!("page {}: {e}", page_idx + 1))? {
                 None => empty_pages += 1,
                 Some(p) => {
+                    table_pages += p.table as usize;
                     if next_row > 0 {
                         breaks.push(next_row); // page break before this page's first row
                     }
@@ -964,7 +1311,7 @@ pub fn convert(
     if cancel.load(Ordering::SeqCst) {
         return Err(CANCELLED.into()); // caller's work dir (holding the saved file) is removed
     }
-    Ok(Stats { pages, empty_pages })
+    Ok(Stats { pages, empty_pages, table_pages })
 }
 
 fn apply_setup(worksheet: &mut Worksheet, s: &PageSetup) {
@@ -979,6 +1326,7 @@ fn apply_setup(worksheet: &mut Worksheet, s: &PageSetup) {
 /// Writes one page at row `base` of `worksheet`. None = the page has no text layer (nothing written).
 fn write_page(
     doc: &PdfDocument,
+    rules_page: Option<PdfPage>,
     page: &PdfPage,
     worksheet: &mut Worksheet,
     base: u32,
@@ -987,11 +1335,39 @@ fn write_page(
 ) -> Result<Option<PageOut>, XlsxError> {
         let page_w = page.width().value as f64;
         let page_h = page.height().value as f64;
-        let words = build_words(&page, page_h);
+        let page_area = (page_w * page_h).max(1.0);
+        let image_cover: f64 = page
+            .objects()
+            .iter()
+            .filter(|o| o.object_type() == PdfPageObjectType::Image)
+            .filter_map(|o| o.bounds().ok())
+            .map(|b| {
+                let r = b.to_rect();
+                let w = (r.right().value.min(page_w as f32) - r.left().value.max(0.0)).max(0.0) as f64;
+                let h = (r.top().value.min(page_h as f32) - r.bottom().value.max(0.0)).max(0.0) as f64;
+                w * h
+            })
+            .sum();
+        let scan_page = image_cover >= 0.8 * page_area;
+        // OCR text layer: a scan page whose text is mostly invisible (Tr 3). A digital page on a full-page
+        // background image keeps the normal path.
+        let ocr_text = scan_page
+            && page.text().is_ok_and(|t| {
+                let chars = t.chars();
+                let (n, inv) = chars.iter().take(400).fold((0usize, 0usize), |(n, inv), c| {
+                    (n + 1, inv + matches!(c.render_mode(), Ok(PdfPageTextRenderMode::Invisible)) as usize)
+                });
+                n > 0 && inv * 2 >= n
+            });
+        let mut words = build_words(&page, page_h, ocr_text);
         if words.is_empty() {
             return Ok(None);
         }
-        let (mut horiz_raw, vert_raw) = page_path_segments(&page, page_h);
+        // A scan is often stored as several image strips (big_scan_footer: 9 per page), which the
+        // per-image >50% rule below misses: decoding + embedding them costs ~1.2 s/page. Sum the
+        // image boxes first (cheap, no decoding); if they cover ≥80% of the page (same threshold as
+        // `pdf::is_scanned`), it's a scan page → no images at all.
+        let (mut horiz_raw, mut vert_raw) = page_path_segments(&page, page_h);
 
 
         // --- underline detection: a horizontal segment not connected to any vertical ruling
@@ -1034,6 +1410,34 @@ fn write_page(
             }
             true
         });
+
+        // --- scan page with text (OCR'd by us or before): ruling lines come from the raster (deskewed, so
+        // the words are rotated by the same skew), and the OCR word boxes make font sizes jump, so every cell
+        // gets the page's median size. ---
+        if ocr_text {
+            // OCR reads table rules as "|": drop bare bars and trim them off words (a lone "-" is real data)
+            for w in &mut words {
+                w.text = w.text.trim_matches('|').to_string();
+            }
+            words.retain(|w| !w.text.is_empty());
+            // ponytail: a page with < 20 words (big_scan_footer: a footer line on a scan) has no table worth
+            // the ~0.1 s raster pass per page; lower this if small scanned tables get missed.
+            if words.len() >= 20 {
+                let (h, v, s) = raster_page_rules(rules_page.as_ref().unwrap_or(page), page_w, page_h);
+                horiz_raw.extend(h);
+                vert_raw.extend(v);
+                let (cx, cy) = (page_w / 2.0, page_h / 2.0);
+                for w in &mut words {
+                    let (xm, ym) = ((w.left + w.right) / 2.0, (w.top + w.bottom) / 2.0);
+                    let (dx, dy) = (s * (ym - cy), -s * (xm - cx));
+                    (w.left, w.right, w.top, w.bottom) = (w.left + dx, w.right + dx, w.top + dy, w.bottom + dy);
+                }
+            }
+            let m = median(words.iter().map(|w| w.font_size).collect());
+            for w in &mut words {
+                w.font_size = m;
+            }
+        }
 
         // --- content bounding box: every text char + every ruling line on the page. Margins
         // are derived from this, not from the table's own offset (an offset-derived margin left
@@ -1401,24 +1805,6 @@ fn write_page(
 
         // --- images: place raster image page objects at their PDF position/size. Skip page-
         // covering scans (would turn the sheet into one big picture) and tiny/decorative ones. ---
-        let page_area = (page_w * page_h).max(1.0);
-        // A scan is often stored as several image strips (big_scan_footer: 9 per page), which the
-        // per-image >50% rule below misses: decoding + embedding them costs ~1.2 s/page. Sum the
-        // image boxes first (cheap, no decoding); if they cover ≥80% of the page (same threshold as
-        // `pdf::is_scanned`), it's a scan page → no images at all.
-        let image_cover: f64 = page
-            .objects()
-            .iter()
-            .filter(|o| o.object_type() == PdfPageObjectType::Image)
-            .filter_map(|o| o.bounds().ok())
-            .map(|b| {
-                let r = b.to_rect();
-                let w = (r.right().value.min(page_w as f32) - r.left().value.max(0.0)).max(0.0) as f64;
-                let h = (r.top().value.min(page_h as f32) - r.bottom().value.max(0.0)).max(0.0) as f64;
-                w * h
-            })
-            .sum();
-        let scan_page = image_cover >= 0.8 * page_area;
         for object in page.objects().iter() {
             if scan_page || object.object_type() != PdfPageObjectType::Image {
                 continue;
@@ -1468,6 +1854,7 @@ fn write_page(
         let header_in = (top_in * 0.5).min(top_in);
         let footer_in = (bottom_in * 0.5).min(bottom_in);
         Ok(Some(PageOut {
+            table: table.is_some(),
             rows: r2 - base,
             widths: (0..grid.ncols()).map(|c| pt_to_excel_col_width(grid.xs[c + 1] - grid.xs[c])).collect(),
             setup: PageSetup {
@@ -1671,7 +2058,7 @@ fn parse_indonesian_number_full(raw: &str) -> Option<(f64, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_indonesian_number, parse_number_cell};
+    use super::{parse_indonesian_number, parse_number_cell, raster_rules};
 
     #[test]
     fn number_parsing() {
@@ -1714,4 +2101,39 @@ mod tests {
         assert_eq!(parse_number_cell("100,00%").unwrap().2, "#,##0.00%");
         assert_eq!(parse_number_cell("1.204.500").unwrap().2, "#,##0");
     }
+
+    /// 3x3 grid of 2 px lines with 0.5 degree skew plus text-like blobs: exactly 4+4 rules, no blob.
+    #[test]
+    fn raster_rules_grid_and_blobs() {
+        let (w, h) = (800usize, 900usize);
+        let mut g = vec![255u8; w * h];
+        let slope = 0.5f64.to_radians().tan();
+        for i in 0..4 {
+            let c = 100 + 200 * i;
+            for t in 100..=700 {
+                let (y, x) = (c as f64 + (t - 100) as f64 * slope, c as f64 - (t - 100) as f64 * slope); // rotation: verticals lean the other way
+                for d in 0..2 {
+                    g[(y.round() as usize + d) * w + t] = 0; // horizontal at y ~ c, x = t
+                    g[t * w + x.round() as usize + d] = 0; // vertical at x ~ c, y = t
+                }
+            }
+        }
+        // text-like strokes (<= 12 pt = 25 px) inside the cells
+        for (bx, by) in [(130, 130), (160, 133), (330, 330), (360, 332), (530, 530), (140, 530), (540, 140)] {
+            for y in by..by + 10 {
+                for x in bx..bx + 25 {
+                    g[y * w + x] = 0;
+                }
+            }
+        }
+        let (hs, vs, skew) = raster_rules(&g, w, h, 150.0);
+        assert_eq!((hs.len(), vs.len()), (4, 4));
+        assert!((skew - slope).abs() < 0.002, "skew {skew}");
+        // deskewed: each rule sits at one position (the 0.5 degree drift of ~5 px is gone) and spans the grid
+        for s in hs.iter().chain(&vs) {
+            assert!(s.hi - s.lo > 270.0 && s.hi - s.lo < 300.0, "{} {} {}", s.pos, s.lo, s.hi);
+        }
+        assert!(hs.iter().chain(&vs).all(|s| s.thickness == 0.5));
+    }
 }
+

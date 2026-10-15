@@ -88,9 +88,12 @@ export interface WordRequest {
   path: string;
   password: string | null;
   out_mode: OutMode;
+  ocr: boolean;
 }
 export interface WordProgress {
-  stage: "preparing" | "converting" | "saving";
+  stage: "preparing" | "converting" | "saving" | "ocr";
+  done?: number;
+  total?: number;
 }
 export interface WordResult {
   output: string;
@@ -106,9 +109,10 @@ export interface ExcelRequest {
   sheet_mode: "per_page" | "one";
   numbers: boolean;
   out_mode: OutMode;
+  ocr: boolean;
 }
 export interface ExcelProgress {
-  stage: "reading" | "writing" | "excel";
+  stage: "reading" | "writing" | "excel" | "ocr";
   page: number;
   pages: number;
 }
@@ -346,11 +350,13 @@ export const app = $state({
     },
   },
   word: {
+    ocr: true, // OCR switch for the current scanned file (reset to true on every new file)
     run: {
       name: "",
       pages: 0,
       startedAt: 0,
       progress: null as WordProgress | null,
+      ocrStarted: false, // the OCR stage ran: the conversion estimate restarts after it
       result: null as WordResult | null,
       error: "",
     },
@@ -400,11 +406,13 @@ export const app = $state({
   excel: {
     sheetMode: "per_page" as "per_page" | "one",
     numbers: false,
+    ocr: true,
     run: {
       name: "",
       pages: 0,
       startedAt: 0,
       engine: "own" as "own" | "excel",
+      usedOcr: false,
       progress: null as ExcelProgress | null,
       result: null as ExcelResult | null, // own-engine result (first Done card)
       v2: null as ExcelResult | null, // Excel-engine result, shown instead when present
