@@ -41,7 +41,8 @@ of the release zip.
 - ONNX Runtime 1.28.3: MIT License, https://github.com/microsoft/onnxruntime
 - Rust crates `paddle-ocr-rs` (Apache-2.0) and `ort` (MIT or Apache-2.0)
 - The unmodified `onnxruntime.dll` and the model files are embedded in `majipdf.exe` and unpacked next to Ghostscript.
-- License text: `licenses/Apache-2.0.txt`
+- ONNX Runtime's Windows telemetry is switched off when majipdf loads it.
+- License texts: `licenses/Apache-2.0.txt`, `licenses/onnxruntime-MIT.txt`
 
 ## PDFium (chromium build 8066)
 

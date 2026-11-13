@@ -17,7 +17,8 @@
         "height": 766,
         "minWidth": 900,
         "minHeight": 600,
-        "visible": false
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --disable-domain-reliability --disable-crash-reporter --disable-breakpad --no-pings"
       }
     ],
     "security": {

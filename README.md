@@ -23,10 +23,18 @@ It runs on Windows 11 (64-bit). Windows 10 with the WebView2 runtime should work
 I haven't tested it. PDF to Word needs Microsoft Word installed; everything else works
 without Office.
 
-On first launch majipdf unpacks its helpers (PDFium, Ghostscript and the OCR language
-files) to
+On first launch majipdf unpacks its helpers (PDFium, Ghostscript, ONNX Runtime and the
+OCR models) to
 `%LOCALAPPDATA%\majipdf\runtime\` and checks them against hashes built into the exe. It
 does this check on every launch and repairs the folder if anything was changed.
+
+majipdf has no network code, and your documents never leave the computer. Two parts it
+uses come from Microsoft and would report usage data by default, so majipdf turns that
+off: ONNX Runtime (Accurate OCR) is loaded with its telemetry disabled, and the window
+(WebView2) starts with its background network services switched off. WebView2's own
+diagnostic data still follows the Windows diagnostic data setting, which an app can't
+override. Word and Excel, used for PDF to Word and the second Excel method, follow your
+own Office privacy settings.
 
 The exe isn't code-signed yet, so Windows SmartScreen or a company policy may warn you
 or block it. If your IT team blocks it, that's the reason.
@@ -40,15 +48,20 @@ or block it. If your IT team blocks it, that's the reason.
 - Split: every page, page ranges like `1-3, 5, 8-10`, or every N pages.
 - Organize pages: rotate, reorder, delete, or insert pages from another PDF.
 - PDF to Word: uses the Word already on your computer and keeps the layout as Word reads
-  it. Useful when you've lost the original .docx.
+  it. Useful when you've lost the original .docx. For scans, it can recognize the text
+  first, so you get real text instead of pictures of pages.
 - PDF to Excel: a built-in converter that doesn't need Office. The sheet is laid out
   like the PDF page, with the same column widths, merged header cells, borders and
   logos. Values are copied exactly as shown (`054` stays `054`), and you can switch
   numbers to real numbers if you need to calculate. If the result isn't right, there's
-  a second method that uses Excel's own PDF import.
+  a second method that uses Excel's own PDF import. For scans, it can recognize the
+  text and the table lines first.
 - Scan to text (OCR): adds an invisible text layer to scanned pages, so you can search,
   select and copy their text. Indonesian and English. Pages that already have text are
-  kept as they are. Recognition is weaker on text inside ruled table cells.
+  kept as they are. Settings has two OCR quality levels: Accurate (the default, using
+  PaddleOCR) reads noticeably better, especially table headers, and keeps the file size
+  almost unchanged; Fast (Tesseract) is about 3 to 5 times quicker, which helps on long
+  scans.
 - Edit PDF: click a paragraph or line and change its text. It rewraps in place in the
   PDF's own font, and the text below moves to make room. If the font is missing a letter
   you typed, you can switch that paragraph to a similar font from your computer. Works
@@ -85,7 +98,6 @@ A few things apply to every tool:
 
 ## Not there yet
 
-- OCR inside PDF to Word and Excel. For scans, run Scan to text first, then convert.
 - Filling in PDF forms.
 - ZIP files as input for Compress. A folder works.
 - A macOS version. The code builds for macOS and passes automated checks, but I don't
@@ -105,6 +117,10 @@ aren't in the repo, so put them in `_tools/` first:
   [Ghostscript](https://www.ghostscript.com/releases/) 10.x (Windows 64-bit)
 - `_tools/tessdata/eng.traineddata` and `ind.traineddata` from
   [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast)
+- `_tools/paddle/onnxruntime.dll` from
+  [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases) 1.28.3 (win-x64), plus
+  `ch_PP-OCRv5_det_mobile.onnx`, `latin_PP-OCRv5_rec_mobile.onnx` and `latin_v5.dict.txt`
+  (PaddleOCR PP-OCRv5 models in ONNX form, from [RapidOCR](https://github.com/RapidAI/RapidOCR))
 
 Then:
 
@@ -124,7 +140,7 @@ The version is computed at build time as `0.<features>.<commit count>`; see
 ## How it's built
 
 Tauri 2 with a Svelte 5 frontend. The backend is Rust: PDFium through pdfium-render for
-reading and page operations, Ghostscript for compression, rust_xlsxwriter for the Excel
+reading and page operations, Ghostscript for compression and Fast OCR, PaddleOCR on ONNX Runtime for Accurate OCR, rust_xlsxwriter for the Excel
 converter, lopdf for editing text inside the page, and small embedded PowerShell scripts that drive Word and Excel over COM.
 
 I built majipdf with a lot of help from AI coding tools (Claude and Codex). I reviewed

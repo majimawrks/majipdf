@@ -33,7 +33,8 @@ impl Paddle {
         }
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         // ponytail: ort's dynamic loader panics when the DLL can't be loaded; that becomes a plain Err here.
-        std::panic::catch_unwind(|| ort::init_from(dll.display().to_string()).commit().map(|_| ()).map_err(|e| e.to_string()))
+        // telemetry off: Microsoft's official ORT build sends trace events (model info, error messages) via Windows by default
+        std::panic::catch_unwind(|| ort::init_from(dll.display().to_string()).with_telemetry(false).commit().map(|_| ()).map_err(|e| e.to_string()))
             .map_err(|_| "ONNX Runtime could not be loaded".to_string())??;
         let mut db = DbNet::new();
         BaseNet::init_model(&mut db, &det.display().to_string(), threads, Some(l3)).map_err(|e| e.to_string())?;
