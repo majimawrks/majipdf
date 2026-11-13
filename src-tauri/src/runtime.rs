@@ -53,6 +53,17 @@ pub const GS: &str = "gs";
 pub const TESS_ENG: &str = "eng.traineddata";
 pub const TESS_IND: &str = "ind.traineddata";
 
+/// Accurate OCR payload (PaddleOCR via ONNX Runtime; same runtime folder as `GS`).
+pub const PADDLE_ORT: &str = "onnxruntime.dll";
+pub const PADDLE_DET: &str = "ch_PP-OCRv5_det_mobile.onnx";
+pub const PADDLE_REC: &str = "latin_PP-OCRv5_rec_mobile.onnx";
+pub const PADDLE_DICT: &str = "latin_v5.dict.txt";
+
+/// Folder holding the four Accurate-OCR files (`None` when the runtime is unavailable).
+pub fn paddle_dir() -> Option<PathBuf> {
+    path(PADDLE_ORT).ok()?.parent().map(Path::to_path_buf)
+}
+
 /// Folder holding `eng` + `ind` traineddata: `<user data dir>/majipdf/tessdata/` if it has both, else the bundled one.
 pub fn tessdata_dir() -> Option<PathBuf> {
     #[cfg(windows)]
@@ -83,7 +94,7 @@ pub fn warm() {
 mod imp {
     use super::*;
     pub fn path(name: &str) -> Result<PathBuf, String> {
-        let sub = if name == PDFIUM { "pdfium/bin" } else if name.ends_with(".traineddata") { "tessdata" } else { "gs/bin" };
+        let sub = if name == PDFIUM { "pdfium/bin" } else if name.ends_with(".traineddata") { "tessdata" } else if [PADDLE_ORT, PADDLE_DET, PADDLE_REC, PADDLE_DICT].contains(&name) { "paddle" } else { "gs/bin" };
         Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools").join(sub).join(name))
     }
 }

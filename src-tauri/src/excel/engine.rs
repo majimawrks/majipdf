@@ -1351,14 +1351,7 @@ fn write_page(
         let scan_page = image_cover >= 0.8 * page_area;
         // OCR text layer: a scan page whose text is mostly invisible (Tr 3). A digital page on a full-page
         // background image keeps the normal path.
-        let ocr_text = scan_page
-            && page.text().is_ok_and(|t| {
-                let chars = t.chars();
-                let (n, inv) = chars.iter().take(400).fold((0usize, 0usize), |(n, inv), c| {
-                    (n + 1, inv + matches!(c.render_mode(), Ok(PdfPageTextRenderMode::Invisible)) as usize)
-                });
-                n > 0 && inv * 2 >= n
-            });
+        let ocr_text = scan_page && crate::pdf::has_ocr_text(&page);
         let mut words = build_words(&page, page_h, ocr_text);
         if words.is_empty() {
             return Ok(None);

@@ -136,6 +136,18 @@ pub(crate) fn scanned_from(coverage_pct: &[f64]) -> bool {
     2 * n > coverage_pct.len()
 }
 
+/// Page already carries an OCR text layer: its text is mostly invisible (Tr 3), judged on the first 400 chars.
+/// A visible footer on a scan (big_scan_footer) does not count.
+pub(crate) fn has_ocr_text(page: &PdfPage) -> bool {
+    page.text().is_ok_and(|t| {
+        let chars = t.chars();
+        let (n, inv) = chars.iter().take(400).fold((0usize, 0usize), |(n, inv), c| {
+            (n + 1, inv + matches!(c.render_mode(), Ok(PdfPageTextRenderMode::Invisible)) as usize)
+        });
+        n > 0 && inv * 2 >= n
+    })
+}
+
 /// Percentage (0-100) of the page area covered by image objects.
 pub(crate) fn image_coverage(page: &PdfPage) -> f64 {
     let (w, h) = (page.width().value as f64, page.height().value as f64);

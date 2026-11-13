@@ -5,6 +5,9 @@ mod compress;
 mod job;
 mod merge;
 mod ocr;
+mod ocrlayer;
+#[cfg(not(target_os = "macos"))]
+mod paddle;
 mod organize;
 mod pdf;
 mod runtime;

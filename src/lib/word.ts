@@ -1,5 +1,5 @@
 // PDF -> Word: state-backed run logic. Word gives no page progress, so the UI shows a time estimate.
-import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
+import { app, settings, ocrEngine, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const w = app.word;
@@ -38,7 +38,7 @@ export async function startRun() {
     r.progress = p;
   });
   try {
-    const res = await api.wordConvert({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode, ocr });
+    const res = await api.wordConvert({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode, ocr, ocr_engine: ocrEngine() });
     if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;

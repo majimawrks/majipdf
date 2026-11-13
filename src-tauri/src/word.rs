@@ -20,6 +20,8 @@ pub struct WordRequest {
     out_mode: String,
     #[serde(default)]
     ocr: bool,
+    #[serde(default)]
+    ocr_engine: crate::ocr::Engine,
 }
 
 #[derive(Serialize, Clone)]
@@ -35,6 +37,8 @@ pub struct WordResult {
     output: String,
     size: u64,
     seconds: f64,
+    /// Accurate OCR was asked for but could not start; Fast was used.
+    ocr_fallback: bool,
 }
 
 // ---------- script output ----------
@@ -161,6 +165,7 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
     let (input, output, script): (PathBuf, PathBuf, PathBuf) = (work.join("in.pdf"), work.join("out.docx"), work.join("pdf2docx.ps1"));
     let pw = req.password.as_deref().filter(|p| !p.is_empty());
     let mut ocr_done = false;
+    let mut ocr_fallback = false;
     if req.ocr {
         let last = std::cell::Cell::new((0u32, 0u32));
         let r = crate::ocr::ocr_to(src, pw, work, &|p| {
@@ -168,9 +173,10 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
                 last.set((p.done, p.total));
             }
             emit(&WordProgress { stage: "ocr", done: last.get().0, total: last.get().1 });
-        }, false);
+        }, false, req.ocr_engine);
         match r {
             Ok(o) => {
+                ocr_fallback = o.fallback;
                 std::fs::rename(&o.path, &input).map_err(|e| e.to_string())?;
                 ocr_done = true;
             }
@@ -255,7 +261,7 @@ fn convert_in(req: &WordRequest, work: &Path, out_dir: &Path, emit: &dyn Fn(&Wor
     }
     let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "output".into());
     let dest = place(&output, out_dir, &stem, "", "docx")?;
-    Ok(WordResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64() })
+    Ok(WordResult { output: dest.display().to_string(), size: size_of(&dest), seconds: start.elapsed().as_secs_f64(), ocr_fallback })
 }
 
 // ---------- commands ----------
@@ -332,7 +338,7 @@ mod tests {
     }
 
     fn req(p: &Path, pw: Option<String>) -> WordRequest {
-        WordRequest { path: p.display().to_string(), password: pw, out_mode: "next".into(), ocr: false }
+        WordRequest { path: p.display().to_string(), password: pw, out_mode: "next".into(), ocr: false, ocr_engine: Default::default() }
     }
 
     #[test]

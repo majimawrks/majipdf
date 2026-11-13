@@ -1,6 +1,6 @@
 // PDF -> Excel: state-backed run logic. Own engine (fast, page progress) first; the Excel engine
 // is only a "Not right? Try the other method" fallback from the first Done card.
-import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
+import { app, settings, ocrEngine, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const x = app.excel;
@@ -44,6 +44,7 @@ async function run(engine: "own" | "excel") {
       numbers: x.numbers,
       out_mode: settings.outMode,
       ocr,
+      ocr_engine: ocrEngine(),
     });
     if (settled(undefined, back())) return;
     if (id !== runId) return;

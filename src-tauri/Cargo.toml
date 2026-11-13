@@ -28,6 +28,11 @@ flate2 = "1.1" # already in the tree through lopdf; used for capped inflation
 sha2 = "0.10"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
+# Accurate OCR (PaddleOCR through ONNX Runtime, loaded from the bundled DLL). Not on macOS: no universal ORT build yet.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+paddle-ocr-rs = { version = "0.6.1", default-features = false }
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray"] }
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.5"
 

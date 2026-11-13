@@ -63,8 +63,9 @@
   <DoneCard
     subtitle={t("doneSubWord")}
     output={run.result.output}
-    meta={t("wordDoneTook", { s: fmtSize(run.result.size), n: run.result.seconds })}
+    meta={t("wordDoneTook", { s: fmtSize(run.result.size), n: Math.max(1, Math.round(run.result.seconds)) })}
     icon="file-doc"
+    notice={run.result.ocr_fallback ? t("ocrFallback") : undefined}
     onanother={processAnother}
   />
 {:else if app.tool.phase === "error" || file?.damaged}

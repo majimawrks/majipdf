@@ -354,7 +354,7 @@ async function mockWord(req: WordRequest): Promise<WordResult> {
   if (req.path.includes("Arsip")) throw "COM error 0x800706BA"; // mock: generic failure
   const dir = req.path.replace(/[\\/][^\\/]*$/, "");
   const stem = req.path.split(/[\\/]/).pop()!.replace(/\.pdf$/i, "");
-  return { output: `${dir}/${stem}.docx`, size: 210 * 1024, seconds: Math.round((Date.now() - t0) / 1000) };
+  return { output: `${dir}/${stem}.docx`, size: 210 * 1024, seconds: Math.round((Date.now() - t0) / 1000), ocr_fallback: false };
 }
 
 // ---- ocr ------------------------------------------------------------------
@@ -400,7 +400,7 @@ async function mockOcr(req: OcrRequest): Promise<OcrResult> {
   if (req.path.includes("Arsip")) throw "gs failed"; // mock: generic failure
   const dir = req.path.replace(/[\/][^\/]*$/, "");
   const stem = req.path.split(/[\/]/).pop()!.replace(/.pdf$/i, "");
-  return { output: `${dir}/${stem}_ocr.pdf`, size: 580 * 1024, seconds: Math.round((Date.now() - t0) / 1000), ocr_pages: total, pages: total + 2 };
+  return { output: `${dir}/${stem}_ocr.pdf`, size: 580 * 1024, seconds: Math.round((Date.now() - t0) / 1000), ocr_pages: total, pages: total + 2, ocr_fallback: false };
 }
 
 // ---- excel ----------------------------------------------------------------
@@ -465,6 +465,7 @@ async function mockExcel(req: ExcelRequest): Promise<ExcelResult> {
     seconds: Math.round((Date.now() - t0) / 1000),
     pages,
     empty_pages: req.path.includes("Scan") ? 2 : 0,
+    ocr_fallback: false,
   };
 }
 

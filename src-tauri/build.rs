@@ -13,12 +13,16 @@ fn embed_runtime() {
     use std::io::Write;
 
     // Fixed order: the manifest lines (and so the folder hash) are reproducible.
-    const FILES: [(&str, &str); 5] = [
+    const FILES: [(&str, &str); 9] = [
         ("pdfium.dll", "../_tools/pdfium/bin/pdfium.dll"),
         ("gswin64c.exe", "../_tools/gs/bin/gswin64c.exe"),
         ("gsdll64.dll", "../_tools/gs/bin/gsdll64.dll"),
         ("eng.traineddata", "../_tools/tessdata/eng.traineddata"),
         ("ind.traineddata", "../_tools/tessdata/ind.traineddata"),
+        ("onnxruntime.dll", "../_tools/paddle/onnxruntime.dll"),
+        ("ch_PP-OCRv5_det_mobile.onnx", "../_tools/paddle/ch_PP-OCRv5_det_mobile.onnx"),
+        ("latin_PP-OCRv5_rec_mobile.onnx", "../_tools/paddle/latin_PP-OCRv5_rec_mobile.onnx"),
+        ("latin_v5.dict.txt", "../_tools/paddle/latin_v5.dict.txt"),
     ];
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let opts = zip::write::SimpleFileOptions::default()

@@ -89,6 +89,7 @@ export interface WordRequest {
   password: string | null;
   out_mode: OutMode;
   ocr: boolean;
+  ocr_engine: OcrEngine;
 }
 export interface WordProgress {
   stage: "preparing" | "converting" | "saving" | "ocr";
@@ -99,6 +100,7 @@ export interface WordResult {
   output: string;
   size: number;
   seconds: number;
+  ocr_fallback: boolean;
 }
 
 // Excel contract types (see _docs/excel-contract.md)
@@ -110,6 +112,7 @@ export interface ExcelRequest {
   numbers: boolean;
   out_mode: OutMode;
   ocr: boolean;
+  ocr_engine: OcrEngine;
 }
 export interface ExcelProgress {
   stage: "reading" | "writing" | "excel" | "ocr";
@@ -122,13 +125,16 @@ export interface ExcelResult {
   seconds: number;
   pages: number;
   empty_pages: number;
+  ocr_fallback: boolean;
 }
 
 // OCR contract types (see _docs/ocr-contract.md)
+export type OcrEngine = "accurate" | "fast";
 export interface OcrRequest {
   path: string;
   password: string | null;
   out_mode: OutMode;
+  ocr_engine: OcrEngine;
 }
 export interface OcrProgress {
   stage: "preparing" | "reading" | "saving";
@@ -141,6 +147,7 @@ export interface OcrResult {
   seconds: number;
   ocr_pages: number;
   pages: number;
+  ocr_fallback: boolean;
 }
 
 // Edit PDF: the open in-place editor (contract types live in edit.ts)
@@ -264,10 +271,11 @@ interface Settings {
   theme: Theme;
   outMode: OutMode;
   outFolder: string;
+  ocrQuality: OcrEngine; // Accurate = PaddleOCR, Fast = Tesseract (Mac: always Fast)
 }
 
 const SETTINGS_KEY = "majipdf.settings";
-const DEFAULT_SETTINGS: Settings = { lang: "en", theme: "auto", outMode: "next", outFolder: isMac ? "Documents/majipdf" : "Documents\\majipdf" };
+const DEFAULT_SETTINGS: Settings = { lang: "en", theme: "auto", outMode: "next", outFolder: isMac ? "Documents/majipdf" : "Documents\\majipdf", ocrQuality: "accurate" };
 
 function loadSettings(): Settings {
   try {
@@ -281,6 +289,9 @@ function loadSettings(): Settings {
 }
 
 export const settings = $state<Settings>(loadSettings());
+
+/** Engine sent with OCR / Word / Excel requests. */
+export const ocrEngine = (): OcrEngine => (isMac || settings.ocrQuality !== "accurate" ? "fast" : "accurate");
 
 export function saveSettings() {
   try {

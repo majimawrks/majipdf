@@ -69,6 +69,7 @@
     output={res.output}
     meta={t("xlsDoneMeta", { n: fmtNum(res.pages), s: fmtSize(res.size) })}
     icon="file-xls"
+    notice={res.ocr_fallback ? t("ocrFallback") : undefined}
     onanother={processAnother}
     extra={res.empty_pages > 0 ? emptyNote : undefined}
     after={!run.v2 && app.office.excel && !run.usedOcr ? other : undefined}

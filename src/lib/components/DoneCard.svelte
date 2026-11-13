@@ -12,9 +12,10 @@
     icon = "file-pdf",
     onanother,
     extra,
+    notice,
     after,
     anotherLabel,
-  }: { anotherLabel?: string; subtitle: string; output: string; meta: string; icon?: string; onanother: () => void; extra?: Snippet; after?: Snippet } = $props();
+  }: { anotherLabel?: string; subtitle: string; output: string; meta: string; icon?: string; onanother: () => void; notice?: string; extra?: Snippet; after?: Snippet } = $props();
 
   const name = $derived(output.split(/[\\/]/).pop() ?? output);
   const dir = $derived(output.replace(/[\\/][^\\/]*$/, "").split(/[\\/]/).join(" › "));
@@ -52,6 +53,11 @@
     </div>
 
     {@render extra?.()}
+    {#if notice}
+      <div role="note" style="display:flex;gap:10px;padding:12px 14px;border-radius:12px;background:var(--warn-soft);color:var(--warn);font-size:14px">
+        <i class="ph ph-warning" style="font-size:18px;flex-shrink:0"></i>{notice}
+      </div>
+    {/if}
 
     <div style="display:flex;align-items:center;gap:8px;color:var(--text2);overflow-wrap:anywhere">
       <i class="ph ph-folder-simple" style="font-size:18px;flex-shrink:0"></i>{location}

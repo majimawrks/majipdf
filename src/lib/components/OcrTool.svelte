@@ -46,8 +46,9 @@
   <DoneCard
     subtitle={t("doneSubOcr")}
     output={run.result.output}
-    meta={t("ocrDone", { n: fmtNum(run.result.ocr_pages), total: fmtNum(run.result.pages), s: fmtSize(run.result.size), sec: run.result.seconds })}
+    meta={t("ocrDone", { n: fmtNum(run.result.ocr_pages), total: fmtNum(run.result.pages), s: fmtSize(run.result.size), sec: Math.max(1, Math.round(run.result.seconds)) })}
     icon="file-pdf"
+    notice={run.result.ocr_fallback ? t("ocrFallback") : undefined}
     onanother={processAnother}
   />
 {:else if app.tool.phase === "error" || file?.damaged}

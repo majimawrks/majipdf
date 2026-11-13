@@ -1,5 +1,5 @@
 // Scan to text (OCR): state-backed run logic. The backend reports done/total scan pages.
-import { app, settings, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
+import { app, settings, ocrEngine, openTool, settled, requestCancel, type FileInfo } from "./state.svelte";
 import * as api from "./tauri";
 
 const o = app.ocr;
@@ -27,7 +27,7 @@ export async function startRun() {
     if (id === runId) r.progress = p;
   });
   try {
-    const res = await api.ocrRun({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode });
+    const res = await api.ocrRun({ path: f.path, password: app.compress.passwords[f.path] ?? null, out_mode: settings.outMode, ocr_engine: ocrEngine() });
     if (settled(undefined)) return;
     if (id !== runId) return;
     r.result = res;

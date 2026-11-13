@@ -34,6 +34,15 @@ of the release zip.
   and unpacked next to Ghostscript.
 - License text: `licenses/Apache-2.0.txt`
 
+## PaddleOCR models and ONNX Runtime (Accurate OCR, Windows)
+
+- Used for: Scan to text (OCR) in Accurate mode: PP-OCRv5 mobile text detection, PP-OCRv5 latin text recognition and its character list
+- Models: PaddleOCR (PaddlePaddle authors), Apache License 2.0, https://github.com/PaddlePaddle/PaddleOCR , as converted to ONNX by RapidOCR, https://github.com/RapidAI/RapidOCR
+- ONNX Runtime 1.28.3: MIT License, https://github.com/microsoft/onnxruntime
+- Rust crates `paddle-ocr-rs` (Apache-2.0) and `ort` (MIT or Apache-2.0)
+- The unmodified `onnxruntime.dll` and the model files are embedded in `majipdf.exe` and unpacked next to Ghostscript.
+- License text: `licenses/Apache-2.0.txt`
+
 ## PDFium (chromium build 8066)
 
 - Used for: reading PDFs, thumbnails, Merge, Split, Organize, PDF to Excel
