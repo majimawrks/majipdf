@@ -18,7 +18,7 @@
   >
   <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
     <div style="font-size:17px;font-weight:700;color:{on ? 'var(--accent-text)' : 'var(--warn)'}">{t("ocrCardTitle")}</div>
-    <div style="font-size:14px;line-height:1.4">{on ? t(kind === "Word" ? "ocrCardOnWord" : "ocrCardOnExcel", { s: ocrEngine() === "accurate" ? 4 : 3 }) : t(kind === "Word" ? "ocrCardOffWord" : "ocrCardOffExcel")}</div>
+    <div style="font-size:14px;line-height:1.4">{on ? t(kind === "Word" ? "ocrCardOnWord" : "ocrCardOnExcel", { s: ocrEngine() === "accurate" ? 10 : 3 }) : t(kind === "Word" ? "ocrCardOffWord" : "ocrCardOffExcel")}</div>
   </div>
   <div style="flex-shrink:0;min-width:84px;display:flex;justify-content:flex-end">
     <Switch {on} label={on ? t("ocrSwitchOn") : t("ocrSwitchOff")} {onchange} />
