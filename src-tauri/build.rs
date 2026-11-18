@@ -1,4 +1,18 @@
+/// Pinned SHA-256 of the Accurate OCR payload, verified 2026-11-18 (onnxruntime.dll 1.28.3: Authenticode valid,
+/// Microsoft Corporation). Pinned while microsoft/onnxruntime is offline on GitHub (supply-chain caution, see
+/// _docs/STATUS.md Risks). A different file fails the build; update a hash only after re-verifying the new file.
+const PINNED: [(&str, &str); 4] = [
+    ("../_tools/paddle/onnxruntime.dll", "4d2774a5f64e4a230b16b74b167171e92f65b0683c19680c1d04fb284b92a6e2"),
+    ("../_tools/paddle/ch_PP-OCRv5_det_mobile.onnx", "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae"),
+    ("../_tools/paddle/latin_PP-OCRv5_rec_mobile.onnx", "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a"),
+    ("../_tools/paddle/latin_v5.dict.txt", "7b16919dcfbd4d646187f6e12ef947a0ad02c931038a5195799297889cea1f1c"),
+];
+
 fn main() {
+    // every non-Mac build (dev too: debug loads these straight from _tools); a missing file is fine in debug (falls back to Fast)
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        verify_pins();
+    }
     // Windows release only: the macOS app ships gs/pdfium as bundle resources (tauri.macos.conf.json).
     if std::env::var("PROFILE").as_deref() == Ok("release") && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_runtime();
@@ -49,6 +63,16 @@ fn embed_runtime() {
         format!("pub const RUNTIME_HASH8: &str = \"{hash8}\";\npub const MANIFEST: [(&str, u64, &str); {}] = [\n{entries}];\n", FILES.len()),
     )
     .unwrap();
+}
+
+fn verify_pins() {
+    use sha2::{Digest, Sha256};
+    for (src, want) in PINNED {
+        println!("cargo:rerun-if-changed={src}");
+        let Ok(data) = std::fs::read(src) else { continue };
+        let got = hex(&Sha256::digest(&data));
+        assert!(got == want, "{src} does not match its pinned SHA-256 (got {got}, want {want}). Verify the file (Authenticode + source) before changing PINNED in build.rs.");
+    }
 }
 
 fn hex(b: &[u8]) -> String {
